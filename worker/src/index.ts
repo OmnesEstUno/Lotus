@@ -1,5 +1,5 @@
 /**
- * FinanceTool Cloudflare Worker
+ * Finastic Cloudflare Worker
  *
  * Zero external dependencies — all crypto via Web Crypto API.
  *
@@ -18,12 +18,23 @@ export interface Env {
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
 function corsHeaders(origin: string | null, allowedOrigin: string): Record<string, string> {
-  const allowed = allowedOrigin || '*';
+  // Allow localhost for dev (any port) + the configured production origin
+  const isLocalhost = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  const matchesAllowed = origin && allowedOrigin && origin === allowedOrigin;
+
+  let allowOrigin = '*';
+  if (isLocalhost || matchesAllowed) {
+    allowOrigin = origin!;
+  } else if (allowedOrigin) {
+    allowOrigin = allowedOrigin;
+  }
+
   return {
-    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
   };
 }
 

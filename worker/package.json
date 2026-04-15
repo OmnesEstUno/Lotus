@@ -1,5 +1,5 @@
 {
-  "name": "finance-tool-worker",
+  "name": "finastic-worker",
   "private": true,
   "version": "0.1.0",
   "scripts": {

@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+worker/dist/
+
+# Local env files — contain secrets, never commit
+frontend/.env.local
+frontend/.env*.local
+worker/.dev.vars
+worker/.dev.vars.*
+
+# Wrangler local state
+.wrangler/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*

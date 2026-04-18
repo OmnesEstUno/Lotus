@@ -52,7 +52,7 @@ export default function Toast({
         display: 'flex',
         alignItems: 'center',
         gap: 16,
-        minWidth: 320,
+        minWidth: 'min(320px, calc(100vw - 32px))',
         maxWidth: 'calc(100vw - 32px)',
         zIndex: 1000,
         overflow: 'hidden',

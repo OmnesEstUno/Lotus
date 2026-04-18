@@ -3,6 +3,30 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 const profileKey = (username: string) => `users:${username}:profile`;
 const userDataKey = (username: string, leaf: string) => `users:${username}:${leaf}`;
 
+// Shared with index.ts — keeps the Instance shape consistent across migration and CRUD paths.
+export interface MigrationInstance {
+  id: string;
+  name: string;
+  owner: string;
+  members: string[];
+  createdAt: string;
+}
+
+export const instanceMetaKey = (id: string) => `instances:${id}`;
+
+export async function createDefaultInstance(kv: KVNamespace, username: string): Promise<MigrationInstance> {
+  const id = crypto.randomUUID();
+  const instance: MigrationInstance = {
+    id,
+    name: 'My Finances',
+    owner: username,
+    members: [username],
+    createdAt: new Date().toISOString(),
+  };
+  await kv.put(instanceMetaKey(id), JSON.stringify(instance));
+  return instance;
+}
+
 export async function migrateSingleUserToMultiTenant(
   kv: KVNamespace,
   username: string,
@@ -14,16 +38,9 @@ export async function migrateSingleUserToMultiTenant(
   const [hashVal, totpVal] = await Promise.all(legacyAuthKeys.map((k) => kv.get(k)));
   if (!hashVal || !totpVal) throw new Error('Legacy auth data missing; cannot migrate.');
 
-  // Create the default instance
-  const instanceId = crypto.randomUUID();
-  const instance = {
-    id: instanceId,
-    name: 'My Finances',
-    owner: username,
-    members: [username],
-    createdAt: new Date().toISOString(),
-  };
-  await kv.put(`instances:${instanceId}`, JSON.stringify(instance));
+  // Create the default instance via shared helper
+  const instance = await createDefaultInstance(kv, username);
+  const instanceId = instance.id;
 
   // Move legacy data keys into instance-scoped keys
   for (const leaf of legacyDataKeys) {

@@ -17,7 +17,7 @@ import {
   generateTOTPSecret,
   verifyTOTP,
 } from './crypto';
-import { migrateSingleUserToMultiTenant } from './migrations';
+import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey } from './migrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites';
 
 export interface Env {
@@ -127,9 +127,9 @@ const instanceKey = (instanceId: string, leaf: 'data:transactions' | 'data:incom
 
 // ─── User profile helpers ─────────────────────────────────────────────────────
 
-async function getUserProfile(kv: KVNamespace, username: string): Promise<UserProfile> {
+async function getUserProfile(kv: KVNamespace, username: string): Promise<UserProfile | null> {
   const raw = await kv.get(userKey(username, 'profile'));
-  if (!raw) throw new Error(`Profile not found for user: ${username}`);
+  if (!raw) return null;
   return JSON.parse(raw) as UserProfile;
 }
 
@@ -147,7 +147,7 @@ async function resolveInstance(
 ): Promise<{ instanceId: string } | Response> {
   const instanceId = request.headers.get('X-Instance-Id');
   if (!instanceId) return respond({ error: 'Missing instance.' }, 400, cors);
-  const raw = await env.FINANCE_KV.get(`instances:${instanceId}`);
+  const raw = await env.FINANCE_KV.get(instanceMetaKey(instanceId));
   if (!raw) return respond({ error: 'Instance not found.' }, 404, cors);
   const inst = JSON.parse(raw) as Instance;
   if (!inst.members.includes(auth.username)) return respond({ error: 'Forbidden.' }, 403, cors);
@@ -252,10 +252,13 @@ export default {
         }
         const passwordHash = await hashPassword(body.password);
         const totpSecret = generateTOTPSecret();
-        const profile = {
+        const defaultInstance = await createDefaultInstance(env.FINANCE_KV, 'admin');
+        const profile: UserProfile = {
           passwordHash, totpSecret,
           createdAt: new Date().toISOString(),
           confirmed: true,              // admin is pre-confirmed — no TOTP confirm step
+          instanceIds: [defaultInstance.id],
+          activeInstanceId: defaultInstance.id,
         };
         await env.FINANCE_KV.put(userKey('admin', 'profile'), JSON.stringify(profile));
         await addUsername(env.FINANCE_KV, 'admin');
@@ -363,6 +366,10 @@ export default {
           const p = profile as { pendingInviteId?: string };
           delete p.pendingInviteId;
         }
+
+        const defaultInstance = await createDefaultInstance(env.FINANCE_KV, username);
+        (profile as UserProfile).instanceIds = [defaultInstance.id];
+        (profile as UserProfile).activeInstanceId = defaultInstance.id;
 
         await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
         await addUsername(env.FINANCE_KV, username);
@@ -477,9 +484,10 @@ export default {
       // List instances the user is a member of
       if (path === '/api/instances' && method === 'GET') {
         const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User profile not found.' }, 500, cors);
         const instances: Instance[] = [];
         for (const id of profile.instanceIds ?? []) {
-          const raw = await env.FINANCE_KV.get(`instances:${id}`);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (raw) instances.push(JSON.parse(raw) as Instance);
         }
         return respond({ instances, activeInstanceId: profile.activeInstanceId ?? null }, 200, cors);
@@ -492,8 +500,9 @@ export default {
         if (!name) return respond({ error: 'Name required.' }, 400, cors);
         const id = crypto.randomUUID();
         const instance: Instance = { id, name, owner: username, members: [username], createdAt: new Date().toISOString() };
-        await env.FINANCE_KV.put(`instances:${id}`, JSON.stringify(instance));
+        await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(instance));
         const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User profile not found.' }, 500, cors);
         profile.instanceIds = [...(profile.instanceIds ?? []), id];
         if (!profile.activeInstanceId) profile.activeInstanceId = id;
         await saveUserProfile(env.FINANCE_KV, username, profile);
@@ -504,8 +513,18 @@ export default {
       if (path === '/api/instances/active' && method === 'PUT') {
         const body = await request.json() as { instanceId?: string };
         const profile = await getUserProfile(env.FINANCE_KV, username);
-        if (!profile.instanceIds?.includes(body.instanceId ?? '')) return respond({ error: 'Not a member.' }, 403, cors);
-        profile.activeInstanceId = body.instanceId!;
+        if (!profile) return respond({ error: 'User profile not found.' }, 500, cors);
+        const targetId = body.instanceId ?? '';
+        if (!profile.instanceIds?.includes(targetId)) return respond({ error: 'Not a member.' }, 403, cors);
+        // Verify the instance still exists in KV (guard against stale ids from concurrent deletes)
+        const instRaw = await env.FINANCE_KV.get(instanceMetaKey(targetId));
+        if (!instRaw) {
+          // Opportunistic cleanup: remove stale id from profile
+          profile.instanceIds = (profile.instanceIds ?? []).filter((x) => x !== targetId);
+          await saveUserProfile(env.FINANCE_KV, username, profile);
+          return respond({ error: 'Instance not found.' }, 404, cors);
+        }
+        profile.activeInstanceId = targetId;
         await saveUserProfile(env.FINANCE_KV, username, profile);
         return respond({ ok: true }, 200, cors);
       }
@@ -517,34 +536,51 @@ export default {
         if ((m = path.match(/^\/api\/instances\/([^/]+)$/)) && method === 'PUT') {
           const id = m[1];
           const body = await request.json() as { name?: string };
-          const raw = await env.FINANCE_KV.get(`instances:${id}`);
+          const trimmed = (body.name ?? '').trim();
+          if (!trimmed) return respond({ error: 'Name required.' }, 400, cors);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (!raw) return respond({ error: 'Not found.' }, 404, cors);
           const inst = JSON.parse(raw) as Instance;
           if (!inst.members.includes(username)) return respond({ error: 'Forbidden.' }, 403, cors);
-          if (body.name) inst.name = body.name.trim();
-          await env.FINANCE_KV.put(`instances:${id}`, JSON.stringify(inst));
+          inst.name = trimmed;
+          await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
           return respond(inst, 200, cors);
         }
 
         // Delete instance (owner only; removes data too)
         if ((m = path.match(/^\/api\/instances\/([^/]+)$/)) && method === 'DELETE') {
           const id = m[1];
-          const raw = await env.FINANCE_KV.get(`instances:${id}`);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (!raw) return respond({ error: 'Not found.' }, 404, cors);
           const inst = JSON.parse(raw) as Instance;
           if (inst.owner !== username) return respond({ error: 'Only the owner can delete.' }, 403, cors);
           await Promise.all([
-            env.FINANCE_KV.delete(`instances:${id}`),
-            env.FINANCE_KV.delete(`instances:${id}:data:transactions`),
-            env.FINANCE_KV.delete(`instances:${id}:data:income`),
-            env.FINANCE_KV.delete(`instances:${id}:data:userCategories`),
+            // TODO(Task-3.5): also delete year-sharded data keys once year pagination lands.
+            env.FINANCE_KV.delete(instanceMetaKey(id)),
+            env.FINANCE_KV.delete(instanceKey(id, 'data:transactions')),
+            env.FINANCE_KV.delete(instanceKey(id, 'data:income')),
+            env.FINANCE_KV.delete(instanceKey(id, 'data:userCategories')),
           ]);
           // Remove from every member's profile
+          let partialFailures = 0;
           for (const memberUsername of inst.members) {
-            const p = await getUserProfile(env.FINANCE_KV, memberUsername);
-            p.instanceIds = (p.instanceIds ?? []).filter((x) => x !== id);
-            if (p.activeInstanceId === id) p.activeInstanceId = p.instanceIds[0] ?? null;
-            await saveUserProfile(env.FINANCE_KV, memberUsername, p);
+            try {
+              const p = await getUserProfile(env.FINANCE_KV, memberUsername);
+              if (!p) {
+                console.warn(`Delete cascade: profile missing for member "${memberUsername}", skipping.`);
+                partialFailures++;
+                continue;
+              }
+              p.instanceIds = (p.instanceIds ?? []).filter((x) => x !== id);
+              if (p.activeInstanceId === id) p.activeInstanceId = p.instanceIds[0] ?? null;
+              await saveUserProfile(env.FINANCE_KV, memberUsername, p);
+            } catch (err) {
+              console.warn(`Delete cascade: failed to update profile for member "${memberUsername}": ${(err as Error).message}`);
+              partialFailures++;
+            }
+          }
+          if (partialFailures > 0) {
+            return respond({ ok: true, partialFailures }, 200, cors);
           }
           return respond({ ok: true }, 200, cors);
         }
@@ -554,7 +590,7 @@ export default {
           const id = m[1];
           const body = await request.json() as { username?: string };
           const addMember = (body.username ?? '').trim().toLowerCase();
-          const raw = await env.FINANCE_KV.get(`instances:${id}`);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (!raw) return respond({ error: 'Not found.' }, 404, cors);
           const inst = JSON.parse(raw) as Instance;
           if (inst.owner !== username) return respond({ error: 'Only the owner can share.' }, 403, cors);
@@ -562,8 +598,9 @@ export default {
           if (!known.includes(addMember)) return respond({ error: 'Unknown user.' }, 400, cors);
           if (!inst.members.includes(addMember)) {
             inst.members.push(addMember);
-            await env.FINANCE_KV.put(`instances:${id}`, JSON.stringify(inst));
+            await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
             const memberProfile = await getUserProfile(env.FINANCE_KV, addMember);
+            if (!memberProfile) return respond({ error: 'User profile not found.' }, 500, cors);
             memberProfile.instanceIds = [...(memberProfile.instanceIds ?? []), id];
             if (!memberProfile.activeInstanceId) memberProfile.activeInstanceId = id;
             await saveUserProfile(env.FINANCE_KV, addMember, memberProfile);
@@ -575,14 +612,15 @@ export default {
         if ((m = path.match(/^\/api\/instances\/([^/]+)\/members\/([^/]+)$/)) && method === 'DELETE') {
           const id = m[1];
           const memberToRemove = m[2].toLowerCase();
-          const raw = await env.FINANCE_KV.get(`instances:${id}`);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (!raw) return respond({ error: 'Not found.' }, 404, cors);
           const inst = JSON.parse(raw) as Instance;
           if (inst.owner !== username) return respond({ error: 'Only the owner can modify members.' }, 403, cors);
           if (inst.owner === memberToRemove) return respond({ error: 'Cannot remove the owner.' }, 400, cors);
           inst.members = inst.members.filter((u) => u !== memberToRemove);
-          await env.FINANCE_KV.put(`instances:${id}`, JSON.stringify(inst));
+          await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
           const p = await getUserProfile(env.FINANCE_KV, memberToRemove);
+          if (!p) return respond({ error: 'Member profile not found.' }, 500, cors);
           p.instanceIds = (p.instanceIds ?? []).filter((x) => x !== id);
           if (p.activeInstanceId === id) p.activeInstanceId = p.instanceIds[0] ?? null;
           await saveUserProfile(env.FINANCE_KV, memberToRemove, p);

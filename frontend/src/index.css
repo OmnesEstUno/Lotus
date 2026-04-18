@@ -453,3 +453,51 @@ a:hover { color: var(--accent-hover); }
   .hide-mobile { display: none; }
   .login-card { padding: 24px; }
 }
+
+/* ─── Workspace tabs (left sidebar) ─────────────────────────────────────── */
+.workspace-tabs {
+  position: sticky;
+  top: 56px;               /* below navbar — matches .navbar height */
+  align-self: flex-start;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  width: 200px;
+  flex-shrink: 0;
+  padding: 16px 0 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-tab {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+  padding: 10px 24px 10px 14px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: none;
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+
+.workspace-tab:hover {
+  transform: translateX(4px);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding-right: 32px;
+  font-size: 1.02rem;
+}
+
+.workspace-tab.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Dim other tabs while one is hovered */
+.workspace-tabs:hover .workspace-tab:not(:hover):not(.active) {
+  background: var(--bg-base);
+  color: var(--text-muted);
+}

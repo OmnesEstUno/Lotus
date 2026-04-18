@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '../../api/client';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
 import Logo from '../Logo';
+import WorkspaceTabs from './WorkspaceTabs';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -70,9 +71,12 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </div>
       </nav>
-      <main style={{ flex: 1, padding: '32px 0' }}>
-        <div className="container">{children}</div>
-      </main>
+      <div style={{ display: 'flex', flex: 1, minHeight: 'calc(100vh - 56px)' }}>
+        {currentUser && <WorkspaceTabs />}
+        <main style={{ flex: 1, padding: '32px 0', minWidth: 0 }}>
+          <div className="container">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

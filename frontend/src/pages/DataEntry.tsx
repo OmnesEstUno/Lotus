@@ -18,6 +18,7 @@ import {
   recordRowInBatch,
 } from '../utils/dedup';
 import { useUserCategories } from '../hooks/useUserCategories';
+import { useWorkspaces } from '../hooks/useWorkspaces';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../components/CategorySelect';
 import Layout from '../components/layout/Layout';
 import DuplicateStatusCell, { DuplicateStatus } from '../components/data-entry/DuplicateStatusCell';
@@ -80,20 +81,24 @@ export default function DataEntry() {
   // ─── User Categories ─────────────────────────────────────────────────────
   const { userCategories, addCustomCategory, saveMapping } = useUserCategories();
 
+  // ─── Active workspace ─────────────────────────────────────────────────────
+  const { activeInstanceId } = useWorkspaces();
+
   // ─── Existing data for duplicate detection ──────────────────────────────
-  // Loaded on mount so CSV rows can be marked as potential duplicates before
-  // the user even clicks Import. Non-fatal if the fetch fails — the server
-  // still enforces dedup as a safety net.
+  // Loaded on mount (and whenever the active workspace changes) so CSV rows
+  // can be marked as potential duplicates before the user even clicks Import.
+  // Non-fatal if the fetch fails — the server still enforces dedup as a safety net.
   const [existingDedupLookup, setExistingDedupLookup] = useState<ExistingDedupLookup>({
     transactions: new Map(),
     income: new Map(),
   });
 
   useEffect(() => {
+    if (!activeInstanceId) return;
     Promise.all([getTransactions(), getIncome()])
       .then(([txns, inc]) => setExistingDedupLookup(buildExistingDedupLookup(txns, inc)))
       .catch(() => {});
-  }, []);
+  }, [activeInstanceId]);
 
   function handlePreviewCategoryChange(rowIdx: number, pickedValue: string) {
     let categoryName: string | null = pickedValue;

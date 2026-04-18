@@ -95,7 +95,15 @@ a:hover { color: var(--accent-hover); }
   gap: 8px;
 }
 
-.navbar-brand svg { color: var(--accent); }
+.navbar-tagline {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  padding-left: 10px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border);
+}
 
 .navbar-links {
   display: flex;

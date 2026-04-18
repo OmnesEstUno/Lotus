@@ -1,4 +1,4 @@
-import { IncomeEntry, Transaction } from '../types';
+import { IncomeEntry, Transaction, UserCategories } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
@@ -91,15 +91,27 @@ export async function getTransactions(): Promise<Transaction[]> {
   return request('/api/transactions');
 }
 
-export async function addTransactions(transactions: Omit<Transaction, 'id'>[]): Promise<{ added: number }> {
+/** Payload for addTransactions — each row may carry `allowDuplicate` to
+ *  explicitly bypass the server's dedup check (used when the user has
+ *  approved a row that was flagged as a duplicate). */
+export type AddTransactionInput = Omit<Transaction, 'id'> & { allowDuplicate?: boolean };
+
+export async function addTransactions(
+  transactions: AddTransactionInput[],
+): Promise<{ added: number; skipped: number }> {
   return request('/api/transactions', {
     method: 'POST',
     body: JSON.stringify({ transactions }),
   });
 }
 
-export async function deleteTransaction(id: string): Promise<void> {
-  return request(`/api/transactions/${id}`, { method: 'DELETE' });
+export type TransactionUpdate = Partial<Pick<Transaction, 'date' | 'description' | 'category' | 'amount'>>;
+
+export async function updateTransaction(id: string, updates: TransactionUpdate): Promise<Transaction> {
+  return request(`/api/transactions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
 }
 
 // ─── Income ──────────────────────────────────────────────────────────────────
@@ -108,13 +120,84 @@ export async function getIncome(): Promise<IncomeEntry[]> {
   return request('/api/income');
 }
 
-export async function addIncome(entry: Omit<IncomeEntry, 'id'>): Promise<IncomeEntry> {
+export type AddIncomeInput = Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean };
+
+export async function addIncome(
+  entry: AddIncomeInput,
+): Promise<{ skipped: boolean; entry: IncomeEntry | null }> {
   return request('/api/income', {
     method: 'POST',
     body: JSON.stringify({ entry }),
   });
 }
 
-export async function deleteIncome(id: string): Promise<void> {
-  return request(`/api/income/${id}`, { method: 'DELETE' });
+export type IncomeUpdate = Partial<Pick<IncomeEntry, 'date' | 'description' | 'grossAmount' | 'netAmount'>>;
+
+export async function updateIncome(id: string, updates: IncomeUpdate): Promise<IncomeEntry> {
+  return request(`/api/income/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+// ─── Bulk operations ─────────────────────────────────────────────────────────
+
+/** Delete a mixed set of transactions and income entries in a single call. */
+export async function bulkDelete(
+  transactionIds: string[],
+  incomeIds: string[],
+): Promise<{ deletedTransactions: number; deletedIncome: number }> {
+  return request('/api/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ transactionIds, incomeIds }),
+  });
+}
+
+/** Irreversibly wipes all transactions and income entries. Keeps user
+ *  categories and mappings. Caller must have already obtained explicit
+ *  confirmation from the user before invoking this. */
+export async function purgeAllData(): Promise<void> {
+  await request('/api/purge-all', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+/** Rename a category everywhere it appears: transactions that use it, user
+ *  mappings that point at it, and the customCategories list (if applicable).
+ *  Returns the number of transactions and mappings that were updated. */
+export async function renameCategory(
+  from: string,
+  to: string,
+): Promise<{ updated: number; mappingsUpdated: number }> {
+  return request('/api/rename-category', {
+    method: 'POST',
+    body: JSON.stringify({ from, to }),
+  });
+}
+
+/** Delete a category. Transactions using it get reassigned to `reassignTo`
+ *  (default "Other"). Mappings pointing at it are removed. The category is
+ *  removed from the user's customCategories list. */
+export async function deleteCategory(
+  name: string,
+  reassignTo = 'Other',
+): Promise<{ reassigned: number; mappingsRemoved: number }> {
+  return request('/api/delete-category', {
+    method: 'POST',
+    body: JSON.stringify({ name, reassignTo }),
+  });
+}
+
+// ─── User Categories ─────────────────────────────────────────────────────────
+
+export async function getUserCategories(): Promise<UserCategories> {
+  return request('/api/user-categories');
+}
+
+export async function saveUserCategories(data: UserCategories): Promise<void> {
+  await request('/api/user-categories', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 }

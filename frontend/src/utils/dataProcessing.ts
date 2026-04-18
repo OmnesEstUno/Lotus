@@ -1,8 +1,20 @@
 import { format, startOfWeek, startOfMonth, startOfYear, subDays, subMonths, parseISO, isWithinInterval } from 'date-fns';
-import { Category, CATEGORIES, IncomeEntry, TimeRange, Transaction } from '../types';
+import { Category, IncomeEntry, TimeRange, Transaction } from '../types';
 
-// All expense categories except Taxes (excluded from trending graph per spec)
-export const TRENDING_CATEGORIES = CATEGORIES.filter((c) => c !== 'Taxes');
+/**
+ * Return every distinct category that has at least one expense transaction,
+ * excluding "Taxes" (which is intentionally hidden from the trending chart).
+ * This yields both built-in and user-created custom categories dynamically.
+ */
+export function getTrendingCategories(transactions: Transaction[]): Category[] {
+  const set = new Set<Category>();
+  for (const t of transactions) {
+    if (t.type !== 'expense') continue;
+    if (t.category === 'Taxes') continue;
+    set.add(t.category);
+  }
+  return [...set].sort();
+}
 
 // ─── Time Range Helpers ──────────────────────────────────────────────────────
 
@@ -38,7 +50,13 @@ function groupByPeriod(range: TimeRange): (date: Date) => string {
 
 // ─── Trending Line Chart Data ────────────────────────────────────────────────
 
-export type LineChartPoint = { label: string } & Partial<Record<Category, number>>;
+// A point on the spending-trends line chart. The `label` key is the time
+// bucket (e.g. "Apr 2026"); all other keys are category names mapping to the
+// spending total in that bucket. Because `Category = string`, we can't use a
+// `Record<Category, number>` type without conflicting with `label: string` —
+// so we widen the value type to `string | number | undefined` and rely on
+// runtime usage to treat category keys as numeric.
+export type LineChartPoint = { label: string } & { [category: string]: string | number | undefined };
 
 export function buildLineChartData(transactions: Transaction[], range: TimeRange): LineChartPoint[] {
   const { start, end } = getDateRange(range);
@@ -94,32 +112,35 @@ export function buildMonthlyExpenseTable(transactions: Transaction[]): MonthlyEx
   const yearStart = startOfYear(new Date(year, 0, 1));
   const yearEnd = new Date(year, 11, 31, 23, 59, 59);
 
+  // Derive categories from the data so custom categories appear automatically.
   const map = new Map<Category, number[]>();
-  CATEGORIES.forEach((c) => map.set(c, new Array(12).fill(0)));
 
   transactions.forEach((t) => {
     if (t.type !== 'expense') return;
     const d = parseISO(t.date);
     if (!isWithinInterval(d, { start: yearStart, end: yearEnd })) return;
     const month = d.getMonth(); // 0-indexed
-    const row = map.get(t.category)!;
-    row[month] += Math.abs(t.amount);
+    if (!map.has(t.category)) map.set(t.category, new Array(12).fill(0));
+    map.get(t.category)![month] += Math.abs(t.amount);
   });
 
-  return CATEGORIES.map((category) => {
-    const months = map.get(category)!;
-    const total = months.reduce((s, v) => s + v, 0);
-    return { category, months, total };
-  }).filter((row) => row.total > 0);
+  return [...map.entries()]
+    .map(([category, months]) => {
+      const total = months.reduce((s, v) => s + v, 0);
+      return { category, months, total };
+    })
+    .filter((row) => row.total > 0)
+    .sort((a, b) => b.total - a.total);
 }
 
 // ─── Income vs Expenditures ──────────────────────────────────────────────────
 
 export interface MonthlyBalance {
   month: string; // "Jan", "Feb", etc.
+  monthIndex: number; // 0–11, useful for click handlers
   income: number;
   expenses: number; // includes taxes
-  surplus: number;
+  surplus: number; // signed — negative means deficit
 }
 
 export function buildMonthlyBalance(transactions: Transaction[], incomeEntries: IncomeEntry[]): MonthlyBalance[] {
@@ -147,10 +168,99 @@ export function buildMonthlyBalance(transactions: Transaction[], incomeEntries: 
 
   return MONTH_NAMES.slice(0, currentMonth + 1).map((month, i) => ({
     month,
+    monthIndex: i,
     income: incomeByMonth[i],
     expenses: expenseByMonth[i],
     surplus: incomeByMonth[i] - expenseByMonth[i],
   }));
+}
+
+// ─── Per-Month Drill-Down ────────────────────────────────────────────────────
+
+export interface DailyBalance {
+  day: number;         // 1–31
+  label: string;       // "1", "2", … "31"
+  income: number;
+  expenses: number;
+}
+
+export function buildDailyBalance(
+  transactions: Transaction[],
+  incomeEntries: IncomeEntry[],
+  year: number,
+  month: number, // 0–11
+): DailyBalance[] {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const result: DailyBalance[] = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    result.push({ day, label: String(day), income: 0, expenses: 0 });
+  }
+
+  transactions.forEach((t) => {
+    if (t.type !== 'expense') return;
+    const d = parseISO(t.date);
+    if (d.getFullYear() !== year || d.getMonth() !== month) return;
+    result[d.getDate() - 1].expenses += Math.abs(t.amount);
+  });
+
+  incomeEntries.forEach((entry) => {
+    const d = parseISO(entry.date);
+    if (d.getFullYear() !== year || d.getMonth() !== month) return;
+    result[d.getDate() - 1].income += entry.netAmount;
+  });
+
+  return result;
+}
+
+export interface MonthEvent {
+  id: string;              // underlying Transaction.id or IncomeEntry.id
+  date: string;            // ISO yyyy-mm-dd
+  day: number;             // day of month
+  kind: 'income' | 'expense';
+  category?: Category;     // only for expenses
+  description: string;
+  amount: number;          // always positive for display
+}
+
+export function buildMonthEvents(
+  transactions: Transaction[],
+  incomeEntries: IncomeEntry[],
+  year: number,
+  month: number, // 0–11
+): MonthEvent[] {
+  const events: MonthEvent[] = [];
+
+  transactions.forEach((t) => {
+    if (t.type !== 'expense') return;
+    const d = parseISO(t.date);
+    if (d.getFullYear() !== year || d.getMonth() !== month) return;
+    events.push({
+      id: t.id,
+      date: t.date,
+      day: d.getDate(),
+      kind: 'expense',
+      category: t.category,
+      description: t.description,
+      amount: Math.abs(t.amount),
+    });
+  });
+
+  incomeEntries.forEach((entry) => {
+    const d = parseISO(entry.date);
+    if (d.getFullYear() !== year || d.getMonth() !== month) return;
+    events.push({
+      id: entry.id,
+      date: entry.date,
+      day: d.getDate(),
+      kind: 'income',
+      description: entry.description,
+      amount: entry.netAmount,
+    });
+  });
+
+  // Chronological: beginning of month at the top → end of month at the bottom
+  events.sort((a, b) => a.date.localeCompare(b.date));
+  return events;
 }
 
 // ─── Average Expenditures Per Category ──────────────────────────────────────
@@ -180,21 +290,20 @@ export function buildCategoryAverages(transactions: Transaction[]): CategoryAver
   );
 
   const totals = new Map<Category, number>();
-  CATEGORIES.forEach((c) => totals.set(c, 0));
 
   expenses.forEach((t) => {
     totals.set(t.category, (totals.get(t.category) ?? 0) + Math.abs(t.amount));
   });
 
-  return CATEGORIES.map((category) => {
-    const total = totals.get(category) ?? 0;
-    return {
+  return [...totals.entries()]
+    .map(([category, total]) => ({
       category,
       total,
       avgPerMonth: total / monthCount,
       months: monthCount,
-    };
-  }).filter((r) => r.total > 0);
+    }))
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.avgPerMonth - a.avgPerMonth);
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────

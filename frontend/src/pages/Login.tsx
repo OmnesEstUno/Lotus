@@ -109,7 +109,7 @@ export default function Login() {
   }
 
   const otpauthUrl = totpSecret
-    ? `otpauth://totp/Finastic:Finastic?secret=${totpSecret}&issuer=Finastic&algorithm=SHA1&digits=6&period=30`
+    ? `otpauth://totp/Lotus:Lotus?secret=${totpSecret}&issuer=Lotus&algorithm=SHA1&digits=6&period=30`
     : '';
 
   if (step === 'loading') {
@@ -128,9 +128,12 @@ export default function Login() {
       <div className="login-card">
         {/* Brand */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Logo size={48} color="var(--accent)" style={{ marginBottom: 12 }} />
-          <h1 style={{ fontSize: '1.5rem' }}>Finastic</h1>
-          <p className="subtitle" style={{ marginTop: 4 }}>
+          <Logo size={56} color="var(--accent)" style={{ margin: '0 auto 12px' }} />
+          <h1 style={{ fontSize: '1.5rem' }}>Lotus</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', marginTop: 2, letterSpacing: '0.01em' }}>
+            Budget. Bloom. Balance
+          </p>
+          <p className="subtitle" style={{ marginTop: 10 }}>
             {step === 'setup-password' || step === 'setup-totp' || step === 'setup-confirm'
               ? 'First-time setup'
               : 'Sign in to your account'}

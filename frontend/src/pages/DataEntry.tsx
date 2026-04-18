@@ -1,16 +1,35 @@
-import { useState, useRef, FormEvent, DragEvent } from 'react';
-import { CATEGORIES, Category, IncomeEntry, ParsedCSVRow, Transaction } from '../types';
+import { useState, useRef, useEffect, FormEvent, DragEvent } from 'react';
+import { BUILT_IN_CATEGORIES, Category, IncomeEntry, ParsedCSVRow } from '../types';
 import { parseTransactionCSV, parseIncomeCSV } from '../utils/csvParser';
 import { parsePDFPaystub, extractIncomeFromCSVText, ExtractedPaystub } from '../utils/pdfParser';
-import { addTransactions, addIncome } from '../api/client';
+import {
+  addTransactions,
+  addIncome,
+  getTransactions,
+  getIncome,
+  AddTransactionInput,
+} from '../api/client';
 import { formatCurrency } from '../utils/dataProcessing';
+import {
+  buildExistingDedupLookup,
+  ExistingDedupLookup,
+  findDuplicateMatch,
+  DuplicateMatch,
+  recordRowInBatch,
+} from '../utils/dedup';
+import { useUserCategories } from '../hooks/useUserCategories';
+import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../components/CategorySelect';
 import Layout from '../components/layout/Layout';
 
 type ManualTab = 'expense' | 'income';
 
+type DuplicateStatus = 'unique' | 'pending' | 'approved' | 'denied';
+
 interface PreviewRow {
   idx: number;
   row: ParsedCSVRow;
+  duplicateStatus: DuplicateStatus;
+  duplicateMatch: DuplicateMatch | null;
 }
 
 export default function DataEntry() {
@@ -52,6 +71,64 @@ export default function DataEntry() {
   const [incomeSuccess, setIncomeSuccess] = useState('');
   const [incomeLowConfidence, setIncomeLowConfidence] = useState(false);
 
+  // ─── User Categories ─────────────────────────────────────────────────────
+  const { userCategories, addCustomCategory, saveMapping } = useUserCategories();
+
+  // ─── Existing data for duplicate detection ──────────────────────────────
+  // Loaded on mount so CSV rows can be marked as potential duplicates before
+  // the user even clicks Import. Non-fatal if the fetch fails — the server
+  // still enforces dedup as a safety net.
+  const [existingDedupLookup, setExistingDedupLookup] = useState<ExistingDedupLookup>({
+    transactions: new Map(),
+    income: new Map(),
+  });
+
+  useEffect(() => {
+    Promise.all([getTransactions(), getIncome()])
+      .then(([txns, inc]) => setExistingDedupLookup(buildExistingDedupLookup(txns, inc)))
+      .catch(() => {});
+  }, []);
+
+  function handlePreviewCategoryChange(rowIdx: number, pickedValue: string) {
+    let categoryName: string | null = pickedValue;
+    let isCustom = userCategories.customCategories.includes(pickedValue);
+
+    if (pickedValue === NEW_CATEGORY_SENTINEL) {
+      const input = window.prompt('Name for the new category:');
+      if (!input) return;
+      categoryName = addCustomCategory(input);
+      if (!categoryName) return;
+      isCustom = !BUILT_IN_CATEGORIES.includes(categoryName as (typeof BUILT_IN_CATEGORIES)[number]);
+    }
+
+    const row = previewRows.find((r) => r.idx === rowIdx);
+    if (row && row.row.kind === 'expense') {
+      if (isCustom) {
+        saveMapping(row.row.description, categoryName);
+      }
+      updateRow(rowIdx, (r) => (r.kind === 'expense' ? { ...r, category: categoryName! } : r));
+    }
+  }
+
+  function handleManualCategoryChange(pickedValue: string) {
+    if (pickedValue === NEW_CATEGORY_SENTINEL) {
+      const input = window.prompt('Name for the new category:');
+      if (!input) return;
+      const name = addCustomCategory(input);
+      if (!name) return;
+      setManualCategory(name);
+      if (!BUILT_IN_CATEGORIES.includes(name as (typeof BUILT_IN_CATEGORIES)[number]) && manualDesc.trim()) {
+        saveMapping(manualDesc.trim(), name);
+      }
+      return;
+    }
+    setManualCategory(pickedValue);
+    const isCustom = userCategories.customCategories.includes(pickedValue);
+    if (isCustom && manualDesc.trim()) {
+      saveMapping(manualDesc.trim(), pickedValue);
+    }
+  }
+
   // ─── Unified Upload ──────────────────────────────────────────────────────
 
   async function handleFile(file: File) {
@@ -66,7 +143,7 @@ export default function DataEntry() {
       return;
     }
 
-    const result = await parseTransactionCSV(file);
+    const result = await parseTransactionCSV(file, userCategories.mappings);
 
     if (result.errors.length > 0 && result.rows.length === 0) {
       setParseErrors(result.errors.map((e) => e.message));
@@ -76,7 +153,23 @@ export default function DataEntry() {
       setParseErrors(result.errors.map((e) => e.message));
     }
     setSkippedCount(result.skippedCount ?? 0);
-    setPreviewRows(result.rows.map((row, idx) => ({ idx, row })));
+
+    // Tag each parsed row with a duplicate status + the matching "twin" row
+    // (if any) so the UI can show the user exactly what this row collides
+    // with. Subsequent identical rows in the same batch are also flagged.
+    const seenTxn = new Map<string, ParsedCSVRow>();
+    const seenIncome = new Map<string, ParsedCSVRow>();
+    const tagged: PreviewRow[] = result.rows.map((row, idx) => {
+      const match = findDuplicateMatch(row, existingDedupLookup, seenTxn, seenIncome);
+      recordRowInBatch(row, seenTxn, seenIncome);
+      return {
+        idx,
+        row,
+        duplicateStatus: match ? 'pending' : 'unique',
+        duplicateMatch: match,
+      };
+    });
+    setPreviewRows(tagged);
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -100,17 +193,50 @@ export default function DataEntry() {
     setPreviewRows((prev) => prev.filter((r) => r.idx !== idx));
   }
 
+  // ─── Duplicate Approval Controls ────────────────────────────────────────
+  function setDuplicateStatus(idx: number, status: DuplicateStatus) {
+    setPreviewRows((prev) =>
+      prev.map((r) => (r.idx === idx ? { ...r, duplicateStatus: status } : r)),
+    );
+  }
+
+  function approveAllPendingDuplicates() {
+    setPreviewRows((prev) =>
+      prev.map((r) => (r.duplicateStatus === 'pending' ? { ...r, duplicateStatus: 'approved' } : r)),
+    );
+  }
+
+  function denyAllPendingDuplicates() {
+    setPreviewRows((prev) =>
+      prev.map((r) => (r.duplicateStatus === 'pending' ? { ...r, duplicateStatus: 'denied' } : r)),
+    );
+  }
+
+  const pendingDuplicateCount = previewRows.filter((r) => r.duplicateStatus === 'pending').length;
+  const totalDuplicateCount = previewRows.filter(
+    (r) => r.duplicateStatus === 'pending' || r.duplicateStatus === 'approved' || r.duplicateStatus === 'denied',
+  ).length;
+
   async function submitUpload() {
     if (previewRows.length === 0) return;
+    if (pendingDuplicateCount > 0) {
+      setSubmitError(
+        `You have ${pendingDuplicateCount} potential duplicate${pendingDuplicateCount !== 1 ? 's' : ''} that still need${pendingDuplicateCount === 1 ? 's' : ''} review. Approve or deny them before importing, or use the batch buttons at the top of the preview.`,
+      );
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const expenseRows = previewRows.filter((r) => r.row.kind === 'expense');
-      const incomeRows = previewRows.filter((r) => r.row.kind === 'income');
+      // Denied rows are dropped entirely
+      const toSubmit = previewRows.filter((r) => r.duplicateStatus !== 'denied');
+      const expenseRows = toSubmit.filter((r) => r.row.kind === 'expense');
+      const incomeRows = toSubmit.filter((r) => r.row.kind === 'income');
 
       let addedTxns = 0;
+      let skippedTxns = 0;
       if (expenseRows.length > 0) {
-        const txns: Omit<Transaction, 'id'>[] = expenseRows.map((r) => {
+        const txns: AddTransactionInput[] = expenseRows.map((r) => {
           const row = r.row as Extract<ParsedCSVRow, { kind: 'expense' }>;
           return {
             date: row.date,
@@ -119,28 +245,50 @@ export default function DataEntry() {
             amount: row.amount,
             type: row.type,
             source: 'csv' as const,
+            // Approved duplicates bypass the server's dedup check
+            allowDuplicate: r.duplicateStatus === 'approved',
           };
         });
-        const { added } = await addTransactions(txns);
-        addedTxns = added;
+        const result = await addTransactions(txns);
+        addedTxns = result.added;
+        skippedTxns = result.skipped;
       }
 
+      let addedIncome = 0;
+      let skippedIncome = 0;
       for (const r of incomeRows) {
         const row = r.row as Extract<ParsedCSVRow, { kind: 'income' }>;
-        await addIncome({
+        const result = await addIncome({
           date: row.date,
           description: row.description,
           grossAmount: row.amount,
           netAmount: row.amount,
           taxes: { federal: 0, state: 0, socialSecurity: 0, medicare: 0, other: 0 },
           source: 'manual',
+          // Approved duplicates bypass the server's dedup check
+          allowDuplicate: r.duplicateStatus === 'approved',
         });
+        if (result.skipped) skippedIncome++;
+        else addedIncome++;
       }
 
-      const parts: string[] = [];
-      if (addedTxns > 0) parts.push(`${addedTxns} expense${addedTxns !== 1 ? 's' : ''}`);
-      if (incomeRows.length > 0) parts.push(`${incomeRows.length} income entr${incomeRows.length !== 1 ? 'ies' : 'y'}`);
-      setSubmitSuccess(`Successfully imported ${parts.join(' and ')}.`);
+      // Build a concise result summary
+      const importedParts: string[] = [];
+      if (addedTxns > 0) importedParts.push(`${addedTxns} expense${addedTxns !== 1 ? 's' : ''}`);
+      if (addedIncome > 0) importedParts.push(`${addedIncome} income entr${addedIncome !== 1 ? 'ies' : 'y'}`);
+
+      const skippedTotal = skippedTxns + skippedIncome;
+      let message: string;
+      if (importedParts.length === 0 && skippedTotal > 0) {
+        message = `No new records imported — all ${skippedTotal} ${skippedTotal !== 1 ? 'entries were' : 'entry was'} already in your data.`;
+      } else if (importedParts.length > 0 && skippedTotal > 0) {
+        message = `Imported ${importedParts.join(' and ')}. ${skippedTotal} duplicate${skippedTotal !== 1 ? 's' : ''} skipped.`;
+      } else if (importedParts.length > 0) {
+        message = `Successfully imported ${importedParts.join(' and ')}.`;
+      } else {
+        message = 'Nothing was imported.';
+      }
+      setSubmitSuccess(message);
       setPreviewRows([]);
       setParseErrors([]);
       setSkippedCount(0);
@@ -153,36 +301,57 @@ export default function DataEntry() {
 
   // ─── Manual Expense ──────────────────────────────────────────────────────
 
+  // When the server flags a manual entry as a duplicate, we stash the pending
+  // payload so the user can choose to re-submit it with allowDuplicate=true.
+  const [manualDuplicatePending, setManualDuplicatePending] = useState<AddTransactionInput | null>(null);
+
+  async function submitManualExpense(payload: AddTransactionInput) {
+    setSubmitting(true);
+    try {
+      const { added, skipped } = await addTransactions([payload]);
+      if (added === 0 && skipped > 0) {
+        setManualError('A transaction with this date, description, and amount already exists.');
+        setManualDuplicatePending(payload);
+        return;
+      }
+      setManualSuccess(`Added "${payload.description}" for ${formatCurrency(Math.abs(payload.amount))}.`);
+      setManualDate('');
+      setManualDesc('');
+      setManualAmount('');
+      setManualCategory('Other');
+      setManualDuplicatePending(null);
+    } catch (err) {
+      setManualError((err as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleManualExpense(e: FormEvent) {
     e.preventDefault();
     setManualError('');
     setManualSuccess('');
+    setManualDuplicatePending(null);
 
     if (!manualDate) { setManualError('Please select a date for this transaction.'); return; }
     if (!manualDesc.trim()) { setManualError('Please enter a description for this transaction.'); return; }
     const amt = parseFloat(manualAmount.replace(/[^0-9.]/g, ''));
     if (isNaN(amt) || amt <= 0) { setManualError('Please enter a valid dollar amount (e.g. 45.99).'); return; }
 
-    setSubmitting(true);
-    try {
-      await addTransactions([{
-        date: manualDate,
-        description: manualDesc.trim(),
-        category: manualCategory,
-        amount: -amt,
-        type: 'expense',
-        source: 'manual',
-      }]);
-      setManualSuccess(`Added "${manualDesc}" for ${formatCurrency(amt)}.`);
-      setManualDate('');
-      setManualDesc('');
-      setManualAmount('');
-      setManualCategory('Other');
-    } catch (err) {
-      setManualError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    await submitManualExpense({
+      date: manualDate,
+      description: manualDesc.trim(),
+      category: manualCategory,
+      amount: -amt,
+      type: 'expense',
+      source: 'manual',
+    });
+  }
+
+  async function retryManualExpenseAsDuplicate() {
+    if (!manualDuplicatePending) return;
+    setManualError('');
+    await submitManualExpense({ ...manualDuplicatePending, allowDuplicate: true });
   }
 
   // ─── Pay Stub Upload + Manual Income ─────────────────────────────────────
@@ -222,10 +391,40 @@ export default function DataEntry() {
     }
   }
 
+  // Same pattern as manualDuplicatePending — stash the pending income
+  // payload so the user can choose to add it anyway.
+  const [incomeDuplicatePending, setIncomeDuplicatePending] = useState<Omit<IncomeEntry, 'id'> | null>(null);
+
+  async function submitManualIncome(entry: Omit<IncomeEntry, 'id'>, allowDuplicate = false) {
+    setSubmitting(true);
+    try {
+      const result = await addIncome({ ...entry, allowDuplicate });
+      if (result.skipped) {
+        setIncomeError('An income entry with this date, description, and amount already exists.');
+        setIncomeDuplicatePending(entry);
+        return;
+      }
+      const totalTax = Object.values(entry.taxes).reduce((s, v) => s + v, 0);
+      setIncomeSuccess(
+        `Income of ${formatCurrency(entry.grossAmount)} recorded.` +
+          (totalTax > 0 ? ` ${formatCurrency(totalTax)} in taxes has been added to your expense tracking.` : ''),
+      );
+      setIncDesc(''); setIncDate(''); setIncGross(''); setIncNet('');
+      setIncFederal(''); setIncState(''); setIncSS(''); setIncMedicare(''); setIncOther('');
+      setIncomeFile(null); setIncomeLowConfidence(false);
+      setIncomeDuplicatePending(null);
+    } catch (err) {
+      setIncomeError((err as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleIncomeSubmit(e: FormEvent) {
     e.preventDefault();
     setIncomeError('');
     setIncomeSuccess('');
+    setIncomeDuplicatePending(null);
 
     if (!incDate) { setIncomeError('Please select the pay date.'); return; }
     if (!incDesc.trim()) { setIncomeError('Please enter a description (e.g. "Paycheck – Company Name").'); return; }
@@ -243,31 +442,20 @@ export default function DataEntry() {
       other: parseFloat(incOther) || 0,
     };
 
-    const entry: Omit<IncomeEntry, 'id'> = {
+    await submitManualIncome({
       date: incDate,
       description: incDesc.trim(),
       grossAmount: gross,
       netAmount: net,
       taxes,
       source: incomeFile ? 'paystub' : 'manual',
-    };
+    });
+  }
 
-    setSubmitting(true);
-    try {
-      await addIncome(entry);
-      const totalTax = Object.values(taxes).reduce((s, v) => s + v, 0);
-      setIncomeSuccess(
-        `Income of ${formatCurrency(gross)} recorded.` +
-          (totalTax > 0 ? ` ${formatCurrency(totalTax)} in taxes has been added to your expense tracking.` : ''),
-      );
-      setIncDesc(''); setIncDate(''); setIncGross(''); setIncNet('');
-      setIncFederal(''); setIncState(''); setIncSS(''); setIncMedicare(''); setIncOther('');
-      setIncomeFile(null); setIncomeLowConfidence(false);
-    } catch (err) {
-      setIncomeError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+  async function retryIncomeAsDuplicate() {
+    if (!incomeDuplicatePending) return;
+    setIncomeError('');
+    await submitManualIncome(incomeDuplicatePending, true);
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────
@@ -286,7 +474,7 @@ export default function DataEntry() {
         <div className="card" style={{ marginBottom: 32 }}>
           <div className="card-header">
             <h2>Upload Transactions</h2>
-            <span className="text-xs text-muted">Auto-detects Chase, credit card, or bank/checking CSVs</span>
+            <span className="text-xs text-muted">Works with any bank or card CSV — columns auto-detected</span>
           </div>
 
           {submitSuccess && (
@@ -351,11 +539,49 @@ export default function DataEntry() {
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => { setPreviewRows([]); setParseErrors([]); setSkippedCount(0); }}>Clear</button>
-                  <button className="btn btn-primary btn-sm" onClick={submitUpload} disabled={submitting}>
-                    {submitting ? <span className="spinner" /> : `Import ${previewRows.length} Records`}
+                  <button className="btn btn-primary btn-sm" onClick={submitUpload} disabled={submitting || pendingDuplicateCount > 0}>
+                    {submitting ? <span className="spinner" /> : `Import ${previewRows.filter((r) => r.duplicateStatus !== 'denied').length} Records`}
                   </button>
                 </div>
               </div>
+
+              {/* Duplicate banner — shown whenever any duplicates exist */}
+              {totalDuplicateCount > 0 && (
+                <div
+                  className={`alert ${pendingDuplicateCount > 0 ? 'alert-warning' : 'alert-info'}`}
+                  style={{ marginBottom: 12, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <div style={{ flex: 1 }}>
+                      {pendingDuplicateCount > 0 ? (
+                        <>
+                          <strong>{pendingDuplicateCount}</strong> row{pendingDuplicateCount !== 1 ? 's' : ''} look{pendingDuplicateCount === 1 ? 's' : ''} like{' '}
+                          {pendingDuplicateCount === 1 ? 'a duplicate' : 'duplicates'} of existing entries or earlier rows in this file.
+                          Review each row below or use the batch actions. You can't import until every duplicate has been approved or denied.
+                        </>
+                      ) : (
+                        <>All <strong>{totalDuplicateCount}</strong> potential duplicate{totalDuplicateCount !== 1 ? 's' : ''} reviewed.</>
+                      )}
+                    </div>
+                  </div>
+                  {pendingDuplicateCount > 0 && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button className="btn btn-sm btn-secondary" onClick={approveAllPendingDuplicates}>
+                        Approve all {pendingDuplicateCount}
+                      </button>
+                      <button className="btn btn-sm btn-ghost" onClick={denyAllPendingDuplicates}>
+                        Deny all {pendingDuplicateCount}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="preview-scroll">
                 <table className="table">
                   <thead>
@@ -365,14 +591,23 @@ export default function DataEntry() {
                       <th>Description</th>
                       <th>Category</th>
                       <th className="num">Amount</th>
+                      <th>Status</th>
                       <th style={{ width: 40 }}></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map(({ idx, row }) => {
+                    {previewRows.map(({ idx, row, duplicateStatus, duplicateMatch }) => {
                       const isIncome = row.kind === 'income';
+                      const rowStyle: React.CSSProperties =
+                        duplicateStatus === 'pending'
+                          ? { background: 'rgba(251,191,36,0.06)', borderLeft: '3px solid var(--warning)' }
+                          : duplicateStatus === 'approved'
+                            ? { background: 'rgba(74,222,128,0.05)', borderLeft: '3px solid var(--success)' }
+                            : duplicateStatus === 'denied'
+                              ? { opacity: 0.4, textDecoration: 'line-through' }
+                              : {};
                       return (
-                        <tr key={idx}>
+                        <tr key={idx} style={rowStyle}>
                           <td className="text-sm font-mono" style={{ whiteSpace: 'nowrap' }}>{row.date}</td>
                           <td>
                             <span
@@ -393,25 +628,38 @@ export default function DataEntry() {
                               value={row.description}
                               onChange={(e) => updateRow(idx, (r) => ({ ...r, description: e.target.value } as ParsedCSVRow))}
                             />
+                            {duplicateMatch && duplicateStatus !== 'unique' && (
+                              <div
+                                className="text-xs text-muted"
+                                style={{ marginTop: 4, paddingLeft: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                title={`Matches ${duplicateMatch.source === 'existing' ? 'an existing entry' : 'an earlier row in this file'}: ${duplicateMatch.summary}`}
+                              >
+                                ↳ Matches {duplicateMatch.source === 'existing' ? 'existing' : 'row above'}: {duplicateMatch.summary}
+                              </div>
+                            )}
                           </td>
                           <td>
                             {isIncome ? (
                               <span className="text-xs text-muted">—</span>
                             ) : (
-                              <select
-                                className="select"
-                                style={{ padding: '4px 8px', fontSize: '0.8125rem' }}
-                                value={row.category}
-                                onChange={(e) => updateRow(idx, (r) => ({ ...r, category: e.target.value as Category } as ParsedCSVRow))}
-                              >
-                                {CATEGORIES.map((c) => (
-                                  <option key={c} value={c}>{c}</option>
-                                ))}
-                              </select>
+                              <CategorySelect
+                                value={row.category as Category}
+                                customCategories={userCategories.customCategories}
+                                onChange={(picked) => handlePreviewCategoryChange(idx, picked)}
+                                compact
+                              />
                             )}
                           </td>
                           <td className={`num ${isIncome || row.type === 'refund' ? 'text-success' : 'text-danger'}`}>
                             {isIncome || row.type === 'refund' ? '+' : ''}{formatCurrency(Math.abs(row.amount))}
+                          </td>
+                          <td>
+                            <DuplicateStatusCell
+                              status={duplicateStatus}
+                              onApprove={() => setDuplicateStatus(idx, 'approved')}
+                              onDeny={() => setDuplicateStatus(idx, 'denied')}
+                              onRevert={() => setDuplicateStatus(idx, 'pending')}
+                            />
                           </td>
                           <td>
                             <button
@@ -452,11 +700,32 @@ export default function DataEntry() {
           {manualTab === 'expense' && (
             <form onSubmit={handleManualExpense} style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 560 }}>
               {manualError && (
-                <div className="alert alert-danger">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                  {manualError}
+                <div className="alert alert-danger" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 2 }}>
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span>{manualError}</span>
+                  </div>
+                  {manualDuplicatePending && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        onClick={retryManualExpenseAsDuplicate}
+                        disabled={submitting}
+                      >
+                        Add anyway
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => { setManualDuplicatePending(null); setManualError(''); }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               {manualSuccess && (
@@ -480,9 +749,11 @@ export default function DataEntry() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Category</label>
-                  <select className="select" value={manualCategory} onChange={(e) => setManualCategory(e.target.value as Category)}>
-                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <CategorySelect
+                    value={manualCategory}
+                    customCategories={userCategories.customCategories}
+                    onChange={handleManualCategoryChange}
+                  />
                 </div>
               </div>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
@@ -494,11 +765,32 @@ export default function DataEntry() {
           {manualTab === 'income' && (
             <>
               {incomeError && (
-                <div className="alert alert-danger" style={{ marginBottom: 16 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                  {incomeError}
+                <div className="alert alert-danger" style={{ marginBottom: 16, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 2 }}>
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span>{incomeError}</span>
+                  </div>
+                  {incomeDuplicatePending && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        onClick={retryIncomeAsDuplicate}
+                        disabled={submitting}
+                      >
+                        Add anyway
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => { setIncomeDuplicatePending(null); setIncomeError(''); }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               {incomeSuccess && (
@@ -608,5 +900,91 @@ export default function DataEntry() {
         </div>
       </div>
     </Layout>
+  );
+}
+
+// ─── Duplicate Status Cell ────────────────────────────────────────────────
+//
+// Renders in the preview table's Status column. Shows a chip (or nothing for
+// unique rows) plus inline action buttons that toggle the row's state.
+
+interface DuplicateStatusCellProps {
+  status: DuplicateStatus;
+  onApprove: () => void;
+  onDeny: () => void;
+  onRevert: () => void;
+}
+
+function DuplicateStatusCell({ status, onApprove, onDeny, onRevert }: DuplicateStatusCellProps) {
+  if (status === 'unique') {
+    return <span className="text-xs text-muted">—</span>;
+  }
+
+  const chipStyles: Record<Exclude<DuplicateStatus, 'unique'>, React.CSSProperties> = {
+    pending: {
+      background: 'var(--warning-bg)',
+      color: 'var(--warning)',
+      border: '1px solid rgba(251,191,36,0.25)',
+    },
+    approved: {
+      background: 'var(--success-bg)',
+      color: 'var(--success)',
+      border: '1px solid rgba(74,222,128,0.25)',
+    },
+    denied: {
+      background: 'var(--danger-bg)',
+      color: 'var(--danger)',
+      border: '1px solid rgba(248,113,113,0.25)',
+    },
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+      <span className="chip" style={chipStyles[status as Exclude<DuplicateStatus, 'unique'>]}>
+        {status === 'pending' ? 'Duplicate?' : status === 'approved' ? 'Approved' : 'Denied'}
+      </span>
+      {status === 'pending' && (
+        <>
+          <button
+            className="btn btn-sm"
+            style={{
+              padding: '3px 8px',
+              fontSize: '0.7rem',
+              background: 'var(--success-bg)',
+              color: 'var(--success)',
+              border: '1px solid rgba(74,222,128,0.3)',
+            }}
+            onClick={onApprove}
+            title="Approve — import this row anyway"
+          >
+            Approve
+          </button>
+          <button
+            className="btn btn-sm"
+            style={{
+              padding: '3px 8px',
+              fontSize: '0.7rem',
+              background: 'var(--danger-bg)',
+              color: 'var(--danger)',
+              border: '1px solid rgba(248,113,113,0.3)',
+            }}
+            onClick={onDeny}
+            title="Deny — skip this row"
+          >
+            Deny
+          </button>
+        </>
+      )}
+      {(status === 'approved' || status === 'denied') && (
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ padding: '3px 8px', fontSize: '0.7rem' }}
+          onClick={onRevert}
+          title="Undo — return to pending"
+        >
+          Undo
+        </button>
+      )}
+    </div>
   );
 }

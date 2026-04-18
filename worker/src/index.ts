@@ -1,5 +1,5 @@
 /**
- * Finastic Cloudflare Worker
+ * Lotus Cloudflare Worker
  *
  * Zero external dependencies — all crypto via Web Crypto API.
  *
@@ -195,6 +195,27 @@ function generateId(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * Stable key for identifying duplicate transactions. Two transactions are
+ * considered identical when their date, normalized description, and amount
+ * (rounded to 2 decimals) all match.
+ */
+function transactionKey(t: Pick<Transaction, 'date' | 'description' | 'amount'>): string {
+  const desc = (t.description ?? '').trim().toLowerCase();
+  const amount = Number(t.amount).toFixed(2);
+  return `${t.date}|${desc}|${amount}`;
+}
+
+/**
+ * Same concept for income entries: compares date, description, and net
+ * (take-home) amount.
+ */
+function incomeKey(e: Pick<IncomeEntry, 'date' | 'description' | 'netAmount'>): string {
+  const desc = (e.description ?? '').trim().toLowerCase();
+  const amount = Number(e.netAmount).toFixed(2);
+  return `${e.date}|${desc}|${amount}`;
+}
+
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
 export default {
@@ -337,9 +358,34 @@ export default {
         }
 
         const existing = await getTransactions(env.FINANCE_KV);
-        const added: Transaction[] = body.transactions.map((t) => ({ ...t, id: generateId() }));
-        await saveTransactions(env.FINANCE_KV, [...existing, ...added]);
-        return respond({ added: added.length }, 200, cors);
+
+        // Dedup: match on date + normalized description + rounded amount
+        // against existing rows + previously-accepted rows in this same batch.
+        // A row may carry `allowDuplicate: true` which bypasses the dedup
+        // check entirely for that row (the user explicitly approved it).
+        const seen = new Set(existing.map(transactionKey));
+        const added: Transaction[] = [];
+        let skipped = 0;
+
+        for (const raw of body.transactions) {
+          // Strip the non-persisted flag before storage
+          const { allowDuplicate, ...t } = raw as Omit<Transaction, 'id'> & { allowDuplicate?: boolean };
+
+          if (!allowDuplicate) {
+            const key = transactionKey(t);
+            if (seen.has(key)) {
+              skipped++;
+              continue;
+            }
+            seen.add(key);
+          }
+          added.push({ ...t, id: generateId() });
+        }
+
+        if (added.length > 0) {
+          await saveTransactions(env.FINANCE_KV, [...existing, ...added]);
+        }
+        return respond({ added: added.length, skipped }, 200, cors);
       }
 
       // ── DELETE transaction ──
@@ -353,6 +399,34 @@ export default {
         return respond({ ok: true }, 200, cors);
       }
 
+      // ── PUT transaction (update editable fields in place) ──
+      const txnUpdateMatch = path.match(/^\/api\/transactions\/([^/]+)$/);
+      if (txnUpdateMatch && method === 'PUT') {
+        const id = txnUpdateMatch[1];
+        const body = await request.json() as {
+          date?: string;
+          description?: string;
+          category?: string;
+          amount?: number;
+        };
+        const txns = await getTransactions(env.FINANCE_KV);
+        const idx = txns.findIndex((t) => t.id === id);
+        if (idx < 0) return respond({ error: 'Transaction not found.' }, 404, cors);
+
+        const existing = txns[idx];
+        const updated: Transaction = {
+          ...existing,
+          date: typeof body.date === 'string' && body.date ? body.date : existing.date,
+          description: typeof body.description === 'string' ? body.description : existing.description,
+          category: typeof body.category === 'string' && body.category ? body.category : existing.category,
+          amount: typeof body.amount === 'number' && !isNaN(body.amount) ? body.amount : existing.amount,
+        };
+        const next = [...txns];
+        next[idx] = updated;
+        await saveTransactions(env.FINANCE_KV, next);
+        return respond(updated, 200, cors);
+      }
+
       // ── GET income ──
       if (path === '/api/income' && method === 'GET') {
         const entries = await getIncomeEntries(env.FINANCE_KV);
@@ -361,19 +435,36 @@ export default {
 
       // ── POST income ──
       if (path === '/api/income' && method === 'POST') {
-        const body = await request.json() as { entry?: Omit<IncomeEntry, 'id'> };
+        const body = await request.json() as {
+          entry?: Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean };
+        };
         if (!body.entry) return respond({ error: 'No entry provided.' }, 400, cors);
 
-        const entry: IncomeEntry = { ...body.entry, id: generateId() };
+        const { allowDuplicate, ...rawEntry } = body.entry;
         const existing = await getIncomeEntries(env.FINANCE_KV);
+
+        // Dedup against existing income entries on date + description + netAmount
+        // unless the caller explicitly opted to allow a duplicate.
+        if (!allowDuplicate) {
+          const key = incomeKey(rawEntry);
+          const isDuplicate = existing.some((e) => incomeKey(e) === key);
+          if (isDuplicate) {
+            return respond({ skipped: true, entry: null }, 200, cors);
+          }
+        }
+
+        const entry: IncomeEntry = { ...rawEntry, id: generateId() };
         await saveIncomeEntries(env.FINANCE_KV, [...existing, entry]);
 
-        // Auto-create tax transactions from income entry
+        // Auto-create tax transactions from income entry. These also go
+        // through the transaction dedup logic so we don't double-insert if
+        // someone replays the same income.
         const taxes = entry.taxes;
         const totalTax = (taxes.federal ?? 0) + (taxes.state ?? 0) + (taxes.socialSecurity ?? 0) + (taxes.medicare ?? 0) + (taxes.other ?? 0);
 
         if (totalTax > 0) {
           const taxTxns = await getTransactions(env.FINANCE_KV);
+          const seenTxnKeys = new Set(taxTxns.map(transactionKey));
           const taxEntries: Transaction[] = [];
 
           const taxFields: Array<[keyof TaxBreakdown, string]> = [
@@ -387,15 +478,20 @@ export default {
           for (const [field, label] of taxFields) {
             const amt = taxes[field] ?? 0;
             if (amt > 0) {
-              taxEntries.push({
+              const candidate = {
                 id: generateId(),
                 date: entry.date,
                 description: `${label} — ${entry.description}`,
                 category: 'Taxes',
                 amount: -amt,
-                type: 'expense',
-                source: 'manual',
-              });
+                type: 'expense' as const,
+                source: 'manual' as const,
+              };
+              const k = transactionKey(candidate);
+              if (!seenTxnKeys.has(k)) {
+                seenTxnKeys.add(k);
+                taxEntries.push(candidate);
+              }
             }
           }
 
@@ -404,7 +500,7 @@ export default {
           }
         }
 
-        return respond(entry, 200, cors);
+        return respond({ skipped: false, entry }, 200, cors);
       }
 
       // ── DELETE income ──
@@ -416,6 +512,184 @@ export default {
         if (next.length === entries.length) return respond({ error: 'Income entry not found.' }, 404, cors);
         await saveIncomeEntries(env.FINANCE_KV, next);
         return respond({ ok: true }, 200, cors);
+      }
+
+      // ── PUT income (update editable fields in place) ──
+      const incUpdateMatch = path.match(/^\/api\/income\/([^/]+)$/);
+      if (incUpdateMatch && method === 'PUT') {
+        const id = incUpdateMatch[1];
+        const body = await request.json() as {
+          date?: string;
+          description?: string;
+          grossAmount?: number;
+          netAmount?: number;
+        };
+        const entries = await getIncomeEntries(env.FINANCE_KV);
+        const idx = entries.findIndex((e) => e.id === id);
+        if (idx < 0) return respond({ error: 'Income entry not found.' }, 404, cors);
+
+        const existing = entries[idx];
+        const updated: IncomeEntry = {
+          ...existing,
+          date: typeof body.date === 'string' && body.date ? body.date : existing.date,
+          description: typeof body.description === 'string' ? body.description : existing.description,
+          grossAmount: typeof body.grossAmount === 'number' && !isNaN(body.grossAmount) ? body.grossAmount : existing.grossAmount,
+          netAmount: typeof body.netAmount === 'number' && !isNaN(body.netAmount) ? body.netAmount : existing.netAmount,
+        };
+        const next = [...entries];
+        next[idx] = updated;
+        await saveIncomeEntries(env.FINANCE_KV, next);
+        return respond(updated, 200, cors);
+      }
+
+      // ── GET user categories (custom categories + description mappings) ──
+      if (path === '/api/user-categories' && method === 'GET') {
+        const raw = await env.FINANCE_KV.get('data:userCategories');
+        const data = raw ? JSON.parse(raw) : { customCategories: [], mappings: [] };
+        return respond(data, 200, cors);
+      }
+
+      // ── PUT user categories (replaces the full document) ──
+      if (path === '/api/user-categories' && method === 'PUT') {
+        const body = await request.json() as {
+          customCategories?: string[];
+          mappings?: Array<{ pattern: string; category: string }>;
+        };
+        const customCategories = Array.isArray(body.customCategories)
+          ? body.customCategories.filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+          : [];
+        const mappings = Array.isArray(body.mappings)
+          ? body.mappings.filter(
+              (m) =>
+                m && typeof m.pattern === 'string' && m.pattern.trim().length > 0 &&
+                typeof m.category === 'string' && m.category.trim().length > 0,
+            )
+          : [];
+        await env.FINANCE_KV.put(
+          'data:userCategories',
+          JSON.stringify({ customCategories, mappings }),
+        );
+        return respond({ ok: true }, 200, cors);
+      }
+
+      // ── POST bulk delete (transactions + income in one call) ──
+      if (path === '/api/bulk-delete' && method === 'POST') {
+        const body = await request.json() as { transactionIds?: string[]; incomeIds?: string[] };
+        const txnIds = new Set(Array.isArray(body.transactionIds) ? body.transactionIds : []);
+        const incIds = new Set(Array.isArray(body.incomeIds) ? body.incomeIds : []);
+
+        let deletedTransactions = 0;
+        let deletedIncome = 0;
+
+        if (txnIds.size > 0) {
+          const existing = await getTransactions(env.FINANCE_KV);
+          const next = existing.filter((t) => !txnIds.has(t.id));
+          deletedTransactions = existing.length - next.length;
+          if (deletedTransactions > 0) {
+            await saveTransactions(env.FINANCE_KV, next);
+          }
+        }
+
+        if (incIds.size > 0) {
+          const existing = await getIncomeEntries(env.FINANCE_KV);
+          const next = existing.filter((e) => !incIds.has(e.id));
+          deletedIncome = existing.length - next.length;
+          if (deletedIncome > 0) {
+            await saveIncomeEntries(env.FINANCE_KV, next);
+          }
+        }
+
+        return respond({ deletedTransactions, deletedIncome }, 200, cors);
+      }
+
+      // ── POST purge all data (transactions + income, keeps user categories) ──
+      if (path === '/api/purge-all' && method === 'POST') {
+        const body = await request.json() as { confirm?: boolean };
+        if (body.confirm !== true) {
+          return respond({ error: 'Confirmation required.' }, 400, cors);
+        }
+        await env.FINANCE_KV.delete('data:transactions');
+        await env.FINANCE_KV.delete('data:income');
+        return respond({ ok: true }, 200, cors);
+      }
+
+      // ── POST rename category (cascades through transactions, mappings, custom list) ──
+      if (path === '/api/rename-category' && method === 'POST') {
+        const body = await request.json() as { from?: string; to?: string };
+        const from = (body.from ?? '').trim();
+        const to = (body.to ?? '').trim();
+        if (!from || !to) return respond({ error: 'Both "from" and "to" are required.' }, 400, cors);
+        if (from === to) return respond({ updated: 0 }, 200, cors);
+
+        // Update transactions
+        const txns = await getTransactions(env.FINANCE_KV);
+        let txnUpdates = 0;
+        const nextTxns = txns.map((t) => {
+          if (t.category === from) {
+            txnUpdates++;
+            return { ...t, category: to };
+          }
+          return t;
+        });
+        if (txnUpdates > 0) await saveTransactions(env.FINANCE_KV, nextTxns);
+
+        // Update user categories document
+        const raw = await env.FINANCE_KV.get('data:userCategories');
+        const userCats = raw ? JSON.parse(raw) as { customCategories: string[]; mappings: Array<{ pattern: string; category: string }> } : { customCategories: [], mappings: [] };
+
+        // Rename in customCategories list (if the old name was a custom one)
+        const wasCustom = userCats.customCategories.includes(from);
+        if (wasCustom) {
+          userCats.customCategories = userCats.customCategories.filter((c) => c !== from);
+          if (!userCats.customCategories.includes(to)) {
+            userCats.customCategories.push(to);
+          }
+        }
+
+        // Update any mappings that pointed at the old category
+        let mappingUpdates = 0;
+        userCats.mappings = userCats.mappings.map((m) => {
+          if (m.category === from) {
+            mappingUpdates++;
+            return { ...m, category: to };
+          }
+          return m;
+        });
+
+        await env.FINANCE_KV.put('data:userCategories', JSON.stringify(userCats));
+
+        return respond({ updated: txnUpdates, mappingsUpdated: mappingUpdates }, 200, cors);
+      }
+
+      // ── POST delete category (reassigns everything to "Other" or the provided target) ──
+      if (path === '/api/delete-category' && method === 'POST') {
+        const body = await request.json() as { name?: string; reassignTo?: string };
+        const name = (body.name ?? '').trim();
+        const reassignTo = (body.reassignTo ?? 'Other').trim() || 'Other';
+        if (!name) return respond({ error: 'Missing category name.' }, 400, cors);
+
+        // Reassign transactions
+        const txns = await getTransactions(env.FINANCE_KV);
+        let txnUpdates = 0;
+        const nextTxns = txns.map((t) => {
+          if (t.category === name) {
+            txnUpdates++;
+            return { ...t, category: reassignTo };
+          }
+          return t;
+        });
+        if (txnUpdates > 0) await saveTransactions(env.FINANCE_KV, nextTxns);
+
+        // Remove from custom list + drop any mappings that pointed at this category
+        const raw = await env.FINANCE_KV.get('data:userCategories');
+        const userCats = raw ? JSON.parse(raw) as { customCategories: string[]; mappings: Array<{ pattern: string; category: string }> } : { customCategories: [], mappings: [] };
+        userCats.customCategories = userCats.customCategories.filter((c) => c !== name);
+        const mappingsBefore = userCats.mappings.length;
+        userCats.mappings = userCats.mappings.filter((m) => m.category !== name);
+        const mappingsRemoved = mappingsBefore - userCats.mappings.length;
+        await env.FINANCE_KV.put('data:userCategories', JSON.stringify(userCats));
+
+        return respond({ reassigned: txnUpdates, mappingsRemoved }, 200, cors);
       }
 
       return respond({ error: 'Not found.' }, 404, cors);

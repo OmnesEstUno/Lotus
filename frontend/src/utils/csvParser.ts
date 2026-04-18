@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
-import { CSVParseResult, ParsedCSVRow, ParseError } from '../types';
+import { CategoryMapping, CSVParseResult, ParsedCSVRow, ParseError } from '../types';
 import {
+  applyUserMappings,
   categorize,
   isSkippedCategory,
   isIncomeCategory,
@@ -156,7 +157,12 @@ interface RowOutcome {
   skipped?: boolean;
 }
 
-function parseRow(raw: Record<string, string>, schema: CSVSchema, rowNum: number): RowOutcome {
+function parseRow(
+  raw: Record<string, string>,
+  schema: CSVSchema,
+  rowNum: number,
+  userMappings?: CategoryMapping[],
+): RowOutcome {
   // ─ Date ────────────────────────────────
   const rawDate = raw[schema.date] || '';
   const date = parseDate(rawDate);
@@ -221,6 +227,11 @@ function parseRow(raw: Record<string, string>, schema: CSVSchema, rowNum: number
   //   - the CSV category says so (paycheck, income, tax refund, ...), or
   //   - the description contains an income keyword (payroll, IRS TREAS, ...).
   //
+  // Category resolution: user mappings win over the built-in merchant rules
+  // so that previously-assigned custom categories auto-apply on re-upload.
+  const resolveCategory = () =>
+    applyUserMappings(description, userMappings) ?? categorize(description, csvCategory);
+
   // If positive but not clearly income, treat as a refund (store return).
   if (!signIsExpense) {
     const isIncome = isIncomeCategory(csvCategory) || descriptionLooksLikeIncome(description);
@@ -239,7 +250,7 @@ function parseRow(raw: Record<string, string>, schema: CSVSchema, rowNum: number
         kind: 'expense',
         date,
         description,
-        category: categorize(description, csvCategory),
+        category: resolveCategory(),
         amount: Math.abs(amount),
         type: 'refund',
       },
@@ -252,7 +263,7 @@ function parseRow(raw: Record<string, string>, schema: CSVSchema, rowNum: number
       kind: 'expense',
       date,
       description,
-      category: categorize(description, csvCategory),
+      category: resolveCategory(),
       amount: -Math.abs(amount),
       type: 'expense',
     },
@@ -261,7 +272,10 @@ function parseRow(raw: Record<string, string>, schema: CSVSchema, rowNum: number
 
 // ─── Entrypoint ─────────────────────────────────────────────────────────────
 
-export async function parseTransactionCSV(file: File): Promise<CSVParseResult> {
+export async function parseTransactionCSV(
+  file: File,
+  userMappings?: CategoryMapping[],
+): Promise<CSVParseResult> {
   return new Promise((resolve) => {
     Papa.parse(file, {
       header: true,
@@ -290,7 +304,7 @@ export async function parseTransactionCSV(file: File): Promise<CSVParseResult> {
         let skipped = 0;
 
         rawRows.forEach((raw, idx) => {
-          const outcome = parseRow(raw, schema, idx + 2);
+          const outcome = parseRow(raw, schema, idx + 2, userMappings);
           if (outcome.error) errors.push(outcome.error);
           else if (outcome.skipped) skipped++;
           else if (outcome.row) parsed.push(outcome.row);

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -10,8 +10,8 @@ import {
   TooltipProps,
 } from 'recharts';
 import { Category, TimeRange } from '../../types';
-import { CATEGORY_COLORS } from '../../utils/categories';
-import { buildLineChartData, formatCurrency, getMaxValue, TRENDING_CATEGORIES } from '../../utils/dataProcessing';
+import { getCategoryColor } from '../../utils/categories';
+import { buildLineChartData, formatCurrency, getMaxValue, getTrendingCategories } from '../../utils/dataProcessing';
 import { Transaction } from '../../types';
 
 interface Props {
@@ -68,10 +68,19 @@ function CustomTooltip({ active, payload, label, highlighted }: TooltipProps<num
 }
 
 export default function CategoryLineChart({ transactions, timeRange }: Props) {
-  const allCategories = TRENDING_CATEGORIES as readonly Category[];
-  const [activeCategories, setActiveCategories] = useState<Set<Category>>(new Set(allCategories));
+  // Derive the full category list from the current transactions so custom
+  // categories appear automatically alongside built-ins.
+  const allCategories = useMemo(() => getTrendingCategories(transactions), [transactions]);
+  const [activeCategories, setActiveCategories] = useState<Set<Category>>(() => new Set(allCategories));
   const [hoveredLine, setHoveredLine] = useState<Category | null>(null);
   const [selectedLine, setSelectedLine] = useState<Category | null>(null);
+
+  // When the set of available categories changes (e.g., after a new upload),
+  // re-sync the active set to include everything. User toggles within the
+  // same data reset here — they persist while the data is stable.
+  useEffect(() => {
+    setActiveCategories(new Set(allCategories));
+  }, [allCategories]);
 
   // effective highlight: selection wins, otherwise hover
   const highlighted = selectedLine ?? hoveredLine;
@@ -152,12 +161,12 @@ export default function CategoryLineChart({ transactions, timeRange }: Props) {
                 gap: 6,
                 padding: '4px 10px',
                 borderRadius: 999,
-                border: `1px solid ${isSelected ? CATEGORY_COLORS[cat] : isActive ? CATEGORY_COLORS[cat] + '60' : 'var(--border)'}`,
-                background: isSelected ? CATEGORY_COLORS[cat] + '30' : isActive ? CATEGORY_COLORS[cat] + '18' : 'transparent',
+                border: `1px solid ${isSelected ? getCategoryColor(cat) : isActive ? getCategoryColor(cat) + '60' : 'var(--border)'}`,
+                background: isSelected ? getCategoryColor(cat) + '30' : isActive ? getCategoryColor(cat) + '18' : 'transparent',
                 cursor: 'pointer',
                 fontSize: '0.75rem',
                 fontWeight: 500,
-                color: isActive ? CATEGORY_COLORS[cat] : 'var(--text-muted)',
+                color: isActive ? getCategoryColor(cat) : 'var(--text-muted)',
                 transition: 'all 0.15s',
                 opacity: highlighted && highlighted !== cat ? 0.4 : 1,
               }}
@@ -168,7 +177,7 @@ export default function CategoryLineChart({ transactions, timeRange }: Props) {
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  background: isActive ? CATEGORY_COLORS[cat] : 'var(--border)',
+                  background: isActive ? getCategoryColor(cat) : 'var(--border)',
                   flexShrink: 0,
                 }}
               />
@@ -238,13 +247,13 @@ export default function CategoryLineChart({ transactions, timeRange }: Props) {
                 key={cat}
                 type="monotone"
                 dataKey={cat}
-                stroke={CATEGORY_COLORS[cat]}
+                stroke={getCategoryColor(cat)}
                 strokeWidth={isHighlighted ? 3 : 1.5}
                 dot={false}
                 activeDot={{
                   r: 5,
                   strokeWidth: 2,
-                  stroke: CATEGORY_COLORS[cat],
+                  stroke: getCategoryColor(cat),
                   fill: 'var(--bg-card)',
                   style: { cursor: 'pointer' },
                   onMouseEnter: () => setHoveredLine(cat),

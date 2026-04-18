@@ -1,32 +1,44 @@
+import lotusUrl from './lotus.svg';
+
 interface LogoProps {
+  /** Height of the rendered logo in pixels. Width is derived from the SVG's aspect ratio. */
   size?: number;
+  /** Any CSS color. Defaults to `currentColor` so it inherits from parent text. */
   color?: string;
   style?: React.CSSProperties;
 }
 
+// Source SVG is 180×120 → width is 1.5× the height.
+const ASPECT = 180 / 120;
+
+/**
+ * Lotus app logo.
+ *
+ * Implemented as a CSS mask: the traced SVG acts as an alpha mask and the
+ * background-color provides the fill, so the logo picks up `currentColor`
+ * from its parent (or any color you pass via the `color` prop).
+ */
 export default function Logo({ size = 20, color = 'currentColor', style }: LogoProps) {
+  const width = Math.round(size * ASPECT);
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill={color}
-      xmlns="http://www.w3.org/2000/svg"
-      style={style}
-      aria-label="Finastic lotus logo"
-    >
-      {/* Outer left petal */}
-      <path d="M12 18 C7 17 4 13 3 8 C6 12 9 15 12 18 Z" opacity="0.55" />
-      {/* Outer right petal */}
-      <path d="M12 18 C17 17 20 13 21 8 C18 12 15 15 12 18 Z" opacity="0.55" />
-      {/* Inner left petal */}
-      <path d="M12 18 C9 15 7 10 7 4 C9 9 11 14 12 18 Z" opacity="0.78" />
-      {/* Inner right petal */}
-      <path d="M12 18 C15 15 17 10 17 4 C15 9 13 14 12 18 Z" opacity="0.78" />
-      {/* Center petal */}
-      <path d="M12 18 C14 14 14 7 12 3 C10 7 10 14 12 18 Z" />
-      {/* Base calyx */}
-      <path d="M3 18 Q12 22 21 18 Q12 20 3 18 Z" />
-    </svg>
+    <span
+      role="img"
+      aria-label="Lotus logo"
+      style={{
+        display: 'inline-block',
+        width,
+        height: size,
+        backgroundColor: color,
+        WebkitMaskImage: `url(${lotusUrl})`,
+        WebkitMaskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        WebkitMaskSize: 'contain',
+        maskImage: `url(${lotusUrl})`,
+        maskRepeat: 'no-repeat',
+        maskPosition: 'center',
+        maskSize: 'contain',
+        ...style,
+      }}
+    />
   );
 }

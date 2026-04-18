@@ -1,4 +1,4 @@
-# Finastic
+# Lotus
 
 A personal finance web application hosted on GitHub Pages with a Cloudflare Workers backend.
 
@@ -43,7 +43,7 @@ wrangler secret put ALLOWED_ORIGIN   # e.g. https://omnesestuno.github.io
 wrangler deploy
 ```
 
-After deploying, note your Worker URL (e.g. `https://finastic-api.<your-subdomain>.workers.dev`).
+After deploying, note your Worker URL (e.g. `https://lotus-api.<your-subdomain>.workers.dev`).
 
 ### 2. GitHub Repository Secrets
 
@@ -51,7 +51,7 @@ In your GitHub repo → **Settings → Secrets and variables → Actions**, add:
 
 | Secret | Value |
 |---|---|
-| `VITE_API_URL` | Your Worker URL (e.g. `https://finastic-api.xxx.workers.dev`) |
+| `VITE_API_URL` | Your Worker URL (e.g. `https://lotus-api.xxx.workers.dev`) |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Worker edit permissions |
 
 ### 3. GitHub Pages

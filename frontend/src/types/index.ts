@@ -24,9 +24,6 @@ export type BuiltInCategory = (typeof BUILT_IN_CATEGORIES)[number];
 // Built-in categories get curated colors; custom ones get a hash-derived color.
 export type Category = string;
 
-// Backward-compat alias: iteration over this yields ONLY the built-ins.
-export const CATEGORIES = BUILT_IN_CATEGORIES;
-
 /** A user-defined rule that maps a description pattern to a category. */
 export interface CategoryMapping {
   pattern: string;        // matched as a case-insensitive substring of the description
@@ -98,12 +95,3 @@ export interface ParseError {
   message: string;
 }
 
-export interface SetupStatus {
-  initialized: boolean;
-}
-
-export interface AuthState {
-  step: 'idle' | 'password' | 'totp' | 'authenticated';
-  preAuthToken?: string;
-  error?: string;
-}

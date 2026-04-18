@@ -22,6 +22,13 @@ import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../components/CategorySel
 import Layout from '../components/layout/Layout';
 import DuplicateStatusCell, { DuplicateStatus } from '../components/data-entry/DuplicateStatusCell';
 
+// NOTE: This file is deliberately large because the CSV upload flow and the
+// manual/pay-stub income flow share non-trivial state (existingDedupLookup,
+// pendingDuplicate handoff, useUserCategories). A future refactor should
+// introduce a useDataEntryState() hook and extract CSVUploadPreview,
+// ManualExpenseForm, and IncomeForm as separate components. Tracked as a
+// deferred item in docs/superpowers/plans/2026-04-17-verification-pass.md.
+
 type ManualTab = 'expense' | 'income';
 
 interface PreviewRow {

@@ -3,6 +3,8 @@ import { getTransactions, renameCategory, deleteCategory } from '../api/client';
 import { Transaction, UserCategories } from '../types';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
+import { useCurrentUser } from '../hooks/useCurrentUser';
+import InviteTokensCard from '../components/InviteTokensCard';
 import Layout from '../components/layout/Layout';
 
 /**
@@ -11,6 +13,7 @@ import Layout from '../components/layout/Layout';
  */
 export default function Settings() {
   const { userCategories, setUserCategories } = useUserCategories();
+  const currentUser = useCurrentUser();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -147,6 +150,9 @@ export default function Settings() {
           {status.text}
         </div>
       )}
+
+      {/* ─── Admin: Invite Tokens ─────────────────────────── */}
+      {currentUser === 'admin' && <InviteTokensCard />}
 
       {/* ─── Custom Categories ────────────────────────────── */}
       <div className="card" style={{ marginBottom: 24 }}>

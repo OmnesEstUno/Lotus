@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '../../api/client';
+import { useCurrentUser } from '../../hooks/useCurrentUser';
 import Logo from '../Logo';
 
 interface LayoutProps {
@@ -9,6 +10,7 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const currentUser = useCurrentUser();
 
   async function handleLogout() {
     await logout();
@@ -60,6 +62,11 @@ export default function Layout({ children }: LayoutProps) {
               </svg>
               Logout
             </button>
+            {currentUser && (
+              <span style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+                {currentUser}
+              </span>
+            )}
           </div>
         </div>
       </nav>

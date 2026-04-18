@@ -2,6 +2,21 @@ import { IncomeEntry, Transaction, UserCategories } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
+// ─── Same-tab username change listeners ──────────────────────────────────────
+
+const usernameListeners = new Set<(u: string | null) => void>();
+
+function notifyUsernameChange(u: string | null): void {
+  usernameListeners.forEach((fn) => fn(u));
+}
+
+export function subscribeUsername(fn: (u: string | null) => void): () => void {
+  usernameListeners.add(fn);
+  return () => usernameListeners.delete(fn);
+}
+
+// ─── Token helpers ────────────────────────────────────────────────────────────
+
 function getToken(): string | null {
   return localStorage.getItem('ft_token');
 }
@@ -12,6 +27,10 @@ function setToken(token: string): void {
 
 function clearToken(): void {
   localStorage.removeItem('ft_token');
+}
+
+export function getCurrentUsername(): string | null {
+  return localStorage.getItem('ft_username');
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -26,6 +45,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (res.status === 401) {
     clearToken();
+    localStorage.removeItem('ft_username');
+    notifyUsernameChange(null);
     window.location.hash = '#/login';
     throw new Error('Session expired. Please log in again.');
   }
@@ -39,37 +60,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
-export async function getSetupStatus(): Promise<{ initialized: boolean }> {
+export async function getSetupStatus(): Promise<{ initialized: boolean; migrationPending: boolean }> {
   return request('/api/setup/status');
 }
 
-export async function initSetup(password: string): Promise<{ totpSecret: string }> {
+export async function initSetup(username: string, password: string, inviteToken: string): Promise<{ totpSecret: string; username: string }> {
   return request('/api/setup/init', {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password, inviteToken }),
   });
 }
 
-export async function confirmSetup(totpCode: string): Promise<void> {
+export async function confirmSetup(username: string, totpCode: string): Promise<void> {
   return request('/api/setup/confirm', {
     method: 'POST',
-    body: JSON.stringify({ totpCode }),
+    body: JSON.stringify({ username, totpCode }),
   });
 }
 
-export async function login(password: string): Promise<{ preAuthToken: string }> {
+export async function login(username: string, password: string): Promise<{ preAuthToken: string }> {
   return request('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   });
 }
 
-export async function verify2FA(preAuthToken: string, totpCode: string): Promise<{ token: string }> {
-  const result: { token: string } = await request('/api/auth/verify-2fa', {
+export async function verify2FA(preAuthToken: string, totpCode: string): Promise<{ token: string; username: string }> {
+  const result = await request<{ token: string; username: string }>('/api/auth/verify-2fa', {
     method: 'POST',
     body: JSON.stringify({ preAuthToken, totpCode }),
   });
   setToken(result.token);
+  localStorage.setItem('ft_username', result.username);
+  notifyUsernameChange(result.username);
   return result;
 }
 
@@ -78,7 +101,16 @@ export async function logout(): Promise<void> {
     await request('/api/auth/logout', { method: 'POST' });
   } finally {
     clearToken();
+    localStorage.removeItem('ft_username');
+    notifyUsernameChange(null);
   }
+}
+
+export async function migrateLegacy(username: string, password: string): Promise<{ ok: boolean; moved: number }> {
+  return request('/api/setup/migrate', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
 }
 
 export function isAuthenticated(): boolean {
@@ -200,4 +232,37 @@ export async function saveUserCategories(data: UserCategories): Promise<void> {
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+export async function adminInit(adminSecret: string, password: string): Promise<{ totpSecret: string; otpauthUrl: string }> {
+  const res = await fetch(`${API_URL}/api/admin/init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': adminSecret },
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json().catch(() => ({ error: 'Unexpected server response.' }));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error ?? `Request failed with status ${res.status}`);
+  }
+  return data as { totpSecret: string; otpauthUrl: string };
+}
+
+export interface InviteSummary {
+  id: string;
+  expiresAt: number;
+  createdAt: number;
+  usedBy: string | null;
+  token: string;
+}
+
+export async function createInvite(): Promise<{ id: string; token: string; expiresAt: number }> {
+  return request('/api/admin/invites', { method: 'POST' });
+}
+export async function listInvites(): Promise<{ invites: InviteSummary[] }> {
+  return request('/api/admin/invites');
+}
+export async function deleteInvite(id: string): Promise<{ ok: true }> {
+  return request(`/api/admin/invites/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

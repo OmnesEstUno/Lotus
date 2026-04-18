@@ -10,5 +10,10 @@ id = "ddbca44da4b548c8b9d918d542475468"
 [vars]
 ALLOWED_ORIGIN = "https://omnesestuno.github.io"
 
-# Run `wrangler secret put JWT_SECRET` to set the JWT signing secret
+# Secrets (set via `wrangler secret put <NAME>`):
+#   JWT_SECRET            — signing key for session tokens
+#   ADMIN_INIT_SECRET     — one-time bootstrap gate for POST /api/admin/init.
+#                           After first successful admin creation, this secret
+#                           can be deleted (the endpoint self-disables once
+#                           users:admin:profile exists).
 # Run `wrangler kv namespace create FINANCE_KV` to create the KV namespace

@@ -1,13 +1,6 @@
 import Papa from 'papaparse';
 import { CategoryMapping, CSVParseResult, ParsedCSVRow, ParseError } from '../types';
-import {
-  applyUserMappings,
-  categorize,
-  isSkippedCategory,
-  isIncomeCategory,
-  descriptionLooksLikeIncome,
-  descriptionLooksLikeTransferOrPayment,
-} from './categories';
+import { applyUserMappings, categorize } from './categories';
 
 // ─── Schema Detection ───────────────────────────────────────────────────────
 //
@@ -147,6 +140,71 @@ function parseAmount(raw: string): number | null {
   const num = parseFloat(cleaned);
   if (isNaN(num)) return null;
   return negative ? -num : num;
+}
+
+// ─── CSV-only classification helpers ────────────────────────────────────────
+
+// ─── Categories that mark a row as INCOME in any bank CSV ────────────────
+// Positive amounts + one of these labels → income (not a refund).
+const INCOME_CATEGORY_STRINGS = new Set([
+  'paycheck',
+  'payroll',
+  'salary',
+  'wages',
+  'income',
+  'interest income',
+  'dividend',
+  'dividends',
+  'investment income',
+  'refund',           // tax refund
+  'tax refund',
+  'federal tax',
+  'state tax',
+  'taxes',
+  'tax return',
+  'benefits',
+  'social security',
+  'unemployment',
+]);
+
+// ─── Categories that mean "skip this row entirely" ──────────────────────
+// Transfers between your own accounts, credit card payoffs — never count as
+// income or expense (they'd double-count against the credit-card CSV).
+const SKIP_CATEGORY_STRINGS = new Set([
+  'transfer',
+  'transfers',
+  'internal transfer',
+  'credit card payment',
+  'credit card payoff',
+  'card payment',
+  'balance transfer',
+]);
+
+// Returns true if a CSV "category" column value means this row should be
+// skipped (transfer / CC payoff). Bank-agnostic.
+function isSkippedCategory(csvCategory: string | undefined): boolean {
+  if (!csvCategory) return false;
+  return SKIP_CATEGORY_STRINGS.has(csvCategory.trim().toLowerCase());
+}
+
+// Returns true if a CSV "category" column value (plus positive amount) means
+// this row is income. Bank-agnostic.
+function isIncomeCategory(csvCategory: string | undefined): boolean {
+  if (!csvCategory) return false;
+  return INCOME_CATEGORY_STRINGS.has(csvCategory.trim().toLowerCase());
+}
+
+// Returns true if a description matches patterns that strongly indicate this
+// row is income, regardless of CSV category. Used when there is no category
+// column.
+function descriptionLooksLikeIncome(description: string): boolean {
+  return /\b(payroll|paycheck|direct\s+dep|salary|wages|tax\s+(refund|return)|irs\s+treas|treas\s+310|va\s+benef|benefits|unemployment|\bssa\b|ssi\b|dividend|interest\s+paid|interest\s+income|deposit@mobile|mobile\s+deposit|funds\s+transfer\s+cr|remote\s+deposit)\b/i.test(description);
+}
+
+// Returns true if a description matches patterns for transfers / CC payoffs.
+// Used when there is no category column.
+function descriptionLooksLikeTransferOrPayment(description: string): boolean {
+  return /\b(transfer\s+to|transfer\s+from|venmo\s+(payment|cashout)|\bzelle\b|autopay|auto-pmt|online\s+payment|payment\s+thank\s+you|automatic\s+payment|credit\s+card\s+payment|card\s+payment|epay|e-pay|chase\s+credit\s+crd|citi\s+card)\b/i.test(description);
 }
 
 // ─── Row parser (works for any schema) ──────────────────────────────────────

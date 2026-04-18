@@ -1,5 +1,8 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 
+const profileKey = (username: string) => `users:${username}:profile`;
+const userDataKey = (username: string, leaf: string) => `users:${username}:${leaf}`;
+
 export async function migrateSingleUserToMultiTenant(
   kv: KVNamespace,
   username: string,
@@ -17,13 +20,13 @@ export async function migrateSingleUserToMultiTenant(
     createdAt: new Date().toISOString(),
     confirmed: true,
   };
-  await kv.put(`users:${username}:profile`, JSON.stringify(profile));
+  await kv.put(profileKey(username), JSON.stringify(profile));
   moved++;
 
   for (const leaf of legacyDataKeys) {
     const val = await kv.get(leaf);
     if (val) {
-      await kv.put(`users:${username}:${leaf}`, val);
+      await kv.put(userDataKey(username, leaf), val);
       moved++;
     }
   }

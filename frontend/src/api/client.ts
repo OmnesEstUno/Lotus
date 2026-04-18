@@ -2,6 +2,21 @@ import { IncomeEntry, Transaction, UserCategories } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
+// ─── Same-tab username change listeners ──────────────────────────────────────
+
+const usernameListeners = new Set<(u: string | null) => void>();
+
+function notifyUsernameChange(u: string | null): void {
+  usernameListeners.forEach((fn) => fn(u));
+}
+
+export function subscribeUsername(fn: (u: string | null) => void): () => void {
+  usernameListeners.add(fn);
+  return () => usernameListeners.delete(fn);
+}
+
+// ─── Token helpers ────────────────────────────────────────────────────────────
+
 function getToken(): string | null {
   return localStorage.getItem('ft_token');
 }
@@ -31,6 +46,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (res.status === 401) {
     clearToken();
     localStorage.removeItem('ft_username');
+    notifyUsernameChange(null);
     window.location.hash = '#/login';
     throw new Error('Session expired. Please log in again.');
   }
@@ -76,6 +92,7 @@ export async function verify2FA(preAuthToken: string, totpCode: string): Promise
   });
   setToken(result.token);
   localStorage.setItem('ft_username', result.username);
+  notifyUsernameChange(result.username);
   return result;
 }
 
@@ -85,6 +102,7 @@ export async function logout(): Promise<void> {
   } finally {
     clearToken();
     localStorage.removeItem('ft_username');
+    notifyUsernameChange(null);
   }
 }
 

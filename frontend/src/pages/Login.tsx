@@ -126,8 +126,9 @@ export default function Login() {
       setStep('login-password');
       setPassword('');
       setTotpCode('');
-    } catch {
-      setError('The code you entered is incorrect. Make sure your authenticator app is synced and try again.');
+    } catch (err) {
+      console.error(err);
+      setError((err as Error).message || 'The code you entered is incorrect. Make sure your authenticator app is synced and try again.');
     } finally {
       setLoading(false);
     }
@@ -143,8 +144,9 @@ export default function Login() {
       const { preAuthToken: token } = await login(username, password);
       setPreAuthToken(token);
       setStep('login-totp');
-    } catch {
-      setError('Incorrect username or password. Please try again.');
+    } catch (err) {
+      console.error(err);
+      setError((err as Error).message || 'Incorrect username or password. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -163,8 +165,9 @@ export default function Login() {
     try {
       await verify2FA(preAuthToken, totpCode);
       navigate('/dashboard');
-    } catch {
-      setError('The verification code is incorrect or has expired. Please check your authenticator app and try again.');
+    } catch (err) {
+      console.error(err);
+      setError((err as Error).message || 'The verification code is incorrect or has expired. Please check your authenticator app and try again.');
     } finally {
       setLoading(false);
     }

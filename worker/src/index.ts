@@ -25,6 +25,9 @@ export interface Env {
   ALLOWED_ORIGIN?: string;
 }
 
+/** Auth context returned by authenticate(). Will grow to include instance/workspace id in Task 3. */
+type AuthContext = { username: string };
+
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
 function corsHeaders(origin: string | null, allowedOrigin: string): Record<string, string> {
@@ -57,7 +60,7 @@ function respond(body: unknown, status: number, headers: Record<string, string>)
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 
-async function authenticate(request: Request, env: Env): Promise<{ username: string } | null> {
+async function authenticate(request: Request, env: Env): Promise<AuthContext | null> {
   const auth = request.headers.get('Authorization') ?? '';
   if (!auth.startsWith('Bearer ')) return null;
   try {
@@ -85,7 +88,15 @@ async function addUsername(kv: KVNamespace, username: string): Promise<void> {
 
 // ─── KV key scoping ───────────────────────────────────────────────────────────
 
-const userKey = (username: string, leaf: string) => `users:${username}:${leaf}`;
+const userKey = (username: string, leaf: 'profile' | 'data:transactions' | 'data:income' | 'data:userCategories') =>
+  `users:${username}:${leaf}`;
+
+// ─── Timing-safe dummy hash (lazy, computed once per worker lifetime) ─────────
+
+let cachedDummyHash: Promise<string> | null = null;
+function getDummyHash(): Promise<string> {
+  return (cachedDummyHash ??= hashPassword(`dummy:${crypto.randomUUID()}`));
+}
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -176,16 +187,19 @@ export default {
         const passwordHash = await hashPassword(body.password);
         const totpSecret = generateTOTPSecret();
         const profile = { passwordHash, totpSecret, createdAt: new Date().toISOString(), confirmed: false };
-        await env.FINANCE_KV.put(`users:${username}:profile`, JSON.stringify(profile));
+        await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
 
         return respond({ totpSecret, username }, 200, cors);
       }
 
       // ── Confirm TOTP Setup ──
+      // TODO: consider tying init→confirm with a short-lived token for anti-race hardening.
+      //       Currently any caller who knows the username can attempt confirm; TOTP codes
+      //       rotate every 30s which limits the window, but a pre-auth token would close it.
       if (path === '/api/setup/confirm' && method === 'POST') {
         const body = await request.json() as { username?: string; totpCode?: string };
         const username = (body.username ?? '').trim().toLowerCase();
-        const raw = await env.FINANCE_KV.get(`users:${username}:profile`);
+        const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
         if (!raw) return respond({ error: 'Setup not started for this user.' }, 400, cors);
         const profile = JSON.parse(raw) as { totpSecret: string; confirmed: boolean };
         if (!body.totpCode) return respond({ error: 'Missing TOTP code.' }, 400, cors);
@@ -194,7 +208,7 @@ export default {
         if (!valid) return respond({ error: 'Invalid code.' }, 400, cors);
 
         profile.confirmed = true;
-        await env.FINANCE_KV.put(`users:${username}:profile`, JSON.stringify(profile));
+        await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
         await addUsername(env.FINANCE_KV, username);
         await env.FINANCE_KV.put('meta:initialized', 'true');
 
@@ -207,8 +221,13 @@ export default {
         const username = (body.username ?? '').trim().toLowerCase();
         if (!username || !body.password) return respond({ error: 'Invalid credentials.' }, 401, cors);
 
-        const raw = await env.FINANCE_KV.get(`users:${username}:profile`);
-        if (!raw) return respond({ error: 'Invalid credentials.' }, 401, cors);
+        const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
+        if (!raw) {
+          // Run a dummy verify to equalize response time regardless of whether
+          // the username exists, preventing a timing oracle on username existence.
+          await verifyPassword(body.password, await getDummyHash());
+          return respond({ error: 'Invalid credentials.' }, 401, cors);
+        }
         const profile = JSON.parse(raw) as { passwordHash: string };
 
         const valid = await verifyPassword(body.password, profile.passwordHash);
@@ -246,7 +265,7 @@ export default {
         const stored = await env.FINANCE_KV.get(`preauth:${payload.id}`);
         if (stored !== username) return respond({ error: 'Session expired.' }, 401, cors);
 
-        const raw = await env.FINANCE_KV.get(`users:${username}:profile`);
+        const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
         if (!raw) return respond({ error: 'User not found.' }, 401, cors);
         const profile = JSON.parse(raw) as { totpSecret: string };
 

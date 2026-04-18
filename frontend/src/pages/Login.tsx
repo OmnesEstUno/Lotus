@@ -30,12 +30,23 @@ export default function Login() {
   const [totpCode, setTotpCode] = useState('');
   const [totpSecret, setTotpSecret] = useState('');
   const [preAuthToken, setPreAuthToken] = useState('');
+  const [inviteToken, setInviteToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated()) {
       navigate('/dashboard');
+      return;
+    }
+    // Check for deep-link invite token in the hash (#/signup?token=...)
+    const hash = window.location.hash;
+    const match = hash.match(/[?&]token=([^&]+)/);
+    if (match) {
+      setInviteToken(decodeURIComponent(match[1]));
+      setStep('setup-password');
+      // Clear the hash so the token isn't sitting in the URL bar
+      history.replaceState(null, '', window.location.pathname + window.location.search);
       return;
     }
     getSetupStatus()
@@ -100,7 +111,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { totpSecret: secret } = await initSetup(trimmedUsername, password);
+      const { totpSecret: secret } = await initSetup(trimmedUsername, password, inviteToken);
       setUsername(trimmedUsername);
       setTotpSecret(secret);
       setStep('setup-totp');
@@ -274,6 +285,18 @@ export default function Login() {
               Create a username, password, and set up two-factor authentication to protect your financial data.
             </p>
             <div className="form-group">
+              <label className="form-label">Invite token</label>
+              <input
+                type="text"
+                className="input"
+                value={inviteToken}
+                onChange={(e) => setInviteToken(e.target.value)}
+                placeholder="Paste your invite token"
+                autoComplete="off"
+                required
+              />
+            </div>
+            <div className="form-group">
               <label className="form-label">Username</label>
               <input
                 type="text"
@@ -419,6 +442,13 @@ export default function Login() {
             <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
               {loading ? <span className="spinner" /> : 'Continue'}
             </button>
+            <button
+              type="button"
+              className="btn btn-ghost w-full"
+              onClick={() => { setStep('setup-password'); setError(''); }}
+            >
+              Sign up
+            </button>
           </form>
         )}
 
@@ -451,6 +481,13 @@ export default function Login() {
               onClick={() => { setStep('login-password'); setTotpCode(''); setError(''); }}
             >
               Back
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost w-full"
+              onClick={() => { setStep('setup-password'); setError(''); }}
+            >
+              Sign up
             </button>
           </form>
         )}

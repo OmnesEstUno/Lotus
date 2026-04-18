@@ -64,10 +64,10 @@ export async function getSetupStatus(): Promise<{ initialized: boolean; migratio
   return request('/api/setup/status');
 }
 
-export async function initSetup(username: string, password: string): Promise<{ totpSecret: string; username: string }> {
+export async function initSetup(username: string, password: string, inviteToken: string): Promise<{ totpSecret: string; username: string }> {
   return request('/api/setup/init', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, inviteToken }),
   });
 }
 
@@ -232,4 +232,33 @@ export async function saveUserCategories(data: UserCategories): Promise<void> {
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+export async function adminInit(adminSecret: string, password: string): Promise<{ totpSecret: string; otpauthUrl: string }> {
+  const r = await fetch(`${API_URL}/api/admin/init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': adminSecret },
+    body: JSON.stringify({ password }),
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({ error: r.statusText }))).error ?? 'Admin init failed');
+  return r.json();
+}
+
+export interface InviteSummary {
+  id: string;
+  expiresAt: number;
+  createdAt: number;
+  usedBy: string | null;
+}
+
+export async function createInvite(): Promise<{ id: string; token: string; expiresAt: number }> {
+  return request('/api/admin/invites', { method: 'POST' });
+}
+export async function listInvites(): Promise<{ invites: InviteSummary[] }> {
+  return request('/api/admin/invites');
+}
+export async function deleteInvite(id: string): Promise<{ ok: true }> {
+  return request(`/api/admin/invites/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

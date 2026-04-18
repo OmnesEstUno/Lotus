@@ -18,11 +18,13 @@ import {
   verifyTOTP,
 } from './crypto';
 import { migrateSingleUserToMultiTenant } from './migrations';
+import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites';
 
 export interface Env {
   FINANCE_KV: KVNamespace;
   JWT_SECRET: string;
   ALLOWED_ORIGIN?: string;
+  ADMIN_INIT_SECRET?: string;   // optional — absence disables /api/admin/init
 }
 
 /** Auth context returned by authenticate(). Will grow to include instance/workspace id in Task 3. */
@@ -70,6 +72,13 @@ async function authenticate(request: Request, env: Env): Promise<AuthContext | n
   } catch {
     return null;
   }
+}
+
+async function authenticateAdmin(request: Request, env: Env, cors: Record<string, string>): Promise<AuthContext | Response> {
+  const auth = await authenticate(request, env);
+  if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+  if (auth.username !== 'admin') return respond({ error: 'Forbidden' }, 403, cors);
+  return auth;
 }
 
 // ─── Username helpers ─────────────────────────────────────────────────────────
@@ -163,6 +172,65 @@ export default {
     }
 
     try {
+      // ── Admin Bootstrap ──
+      if (path === '/api/admin/init' && method === 'POST') {
+        const adminSecret = env.ADMIN_INIT_SECRET ?? '';
+        const provided = request.headers.get('X-Admin-Secret') ?? '';
+        // constant-time-ish compare
+        if (!adminSecret || provided.length !== adminSecret.length) {
+          return respond({ error: 'Unauthorized' }, 401, cors);
+        }
+        let mismatch = 0;
+        for (let i = 0; i < adminSecret.length; i++) mismatch |= provided.charCodeAt(i) ^ adminSecret.charCodeAt(i);
+        if (mismatch !== 0) return respond({ error: 'Unauthorized' }, 401, cors);
+
+        const existing = await env.FINANCE_KV.get(userKey('admin', 'profile'));
+        if (existing) return respond({ error: 'Admin already exists.' }, 400, cors);
+
+        const body = await request.json() as { password?: string };
+        if (!body.password || body.password.length < 12) {
+          return respond({ error: 'Password must be at least 12 characters.' }, 400, cors);
+        }
+        const passwordHash = await hashPassword(body.password);
+        const totpSecret = generateTOTPSecret();
+        const profile = {
+          passwordHash, totpSecret,
+          createdAt: new Date().toISOString(),
+          confirmed: true,              // admin is pre-confirmed — no TOTP confirm step
+        };
+        await env.FINANCE_KV.put(userKey('admin', 'profile'), JSON.stringify(profile));
+        await addUsername(env.FINANCE_KV, 'admin');
+        await env.FINANCE_KV.put('meta:initialized', 'true');
+
+        const otpauthUrl = `otpauth://totp/Lotus:admin?secret=${totpSecret}&issuer=Lotus`;
+        return respond({ totpSecret, otpauthUrl }, 200, cors);
+      }
+
+      // ── Admin Invite CRUD ──
+      if (path === '/api/admin/invites' && method === 'POST') {
+        const auth = await authenticateAdmin(request, env, cors);
+        if (auth instanceof Response) return auth;
+        const result = await createInvite(env.FINANCE_KV, env.JWT_SECRET);
+        return respond(result, 200, cors);
+      }
+
+      if (path === '/api/admin/invites' && method === 'GET') {
+        const auth = await authenticateAdmin(request, env, cors);
+        if (auth instanceof Response) return auth;
+        const invites = await listInvites(env.FINANCE_KV);
+        return respond({ invites }, 200, cors);
+      }
+
+      {
+        const m = path.match(/^\/api\/admin\/invites\/([^/]+)$/);
+        if (m && method === 'DELETE') {
+          const auth = await authenticateAdmin(request, env, cors);
+          if (auth instanceof Response) return auth;
+          await deleteInvite(env.FINANCE_KV, m[1]);
+          return respond({ ok: true }, 200, cors);
+        }
+      }
+
       // ── Setup Status ──
       if (path === '/api/setup/status' && method === 'GET') {
         const metaInitialized = (await env.FINANCE_KV.get('meta:initialized')) === 'true';
@@ -173,20 +241,40 @@ export default {
 
       // ── Initialize Setup ──
       if (path === '/api/setup/init' && method === 'POST') {
-        const body = await request.json() as { username?: string; password?: string };
+        const body = await request.json() as { username?: string; password?: string; inviteToken?: string };
         const username = (body.username ?? '').trim().toLowerCase();
         if (!/^[a-z0-9_-]{3,32}$/.test(username)) {
           return respond({ error: 'Username must be 3–32 characters: lowercase letters, digits, underscore, or dash.' }, 400, cors);
         }
+        if (username === 'admin') {
+          return respond({ error: 'This username is reserved.' }, 400, cors);
+        }
         if (!body.password || body.password.length < 8) {
           return respond({ error: 'Password must be at least 8 characters.' }, 400, cors);
         }
+
+        // Verify invite BEFORE any KV writes for the new user
+        const inviteToken = (body.inviteToken ?? '').trim();
+        if (!inviteToken) {
+          return respond({ error: 'An invite token is required to sign up.' }, 400, cors);
+        }
+        const invite = await verifyInvite(env.FINANCE_KV, inviteToken, env.JWT_SECRET);
+        if (!invite.ok) {
+          return respond({ error: `Invite rejected: ${invite.reason}` }, 400, cors);
+        }
+
         const existing = await getUsernames(env.FINANCE_KV);
         if (existing.includes(username)) return respond({ error: 'Username already exists.' }, 400, cors);
 
         const passwordHash = await hashPassword(body.password);
         const totpSecret = generateTOTPSecret();
-        const profile = { passwordHash, totpSecret, createdAt: new Date().toISOString(), confirmed: false };
+        const profile = {
+          passwordHash,
+          totpSecret,
+          createdAt: new Date().toISOString(),
+          confirmed: false,
+          pendingInviteId: invite.id,      // bound for confirm
+        };
         await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
 
         return respond({ totpSecret, username }, 200, cors);
@@ -208,6 +296,13 @@ export default {
         if (!valid) return respond({ error: 'Invalid code.' }, 400, cors);
 
         profile.confirmed = true;
+
+        if ((profile as { pendingInviteId?: string }).pendingInviteId) {
+          const inviteId = (profile as { pendingInviteId?: string }).pendingInviteId!;
+          await markInviteUsed(env.FINANCE_KV, inviteId, username);
+          delete (profile as { pendingInviteId?: string }).pendingInviteId;
+        }
+
         await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
         await addUsername(env.FINANCE_KV, username);
         await env.FINANCE_KV.put('meta:initialized', 'true');

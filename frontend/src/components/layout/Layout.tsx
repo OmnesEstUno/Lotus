@@ -1,29 +1,9 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { createContext, useContext, useState, useCallback, useRef } from 'react';
 import { logout } from '../../api/client';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
+import { useDataEntry } from '../../contexts/DataEntryContext';
 import Logo from '../Logo';
 import WorkspaceTabs from './WorkspaceTabs';
-import Modal from '../Modal';
-import DataEntry from '../../pages/DataEntry';
-
-// ─── DataEntry Context ────────────────────────────────────────────────────────
-
-interface DataEntryContextValue {
-  open: () => void;
-  close: () => void;
-  onSubmitted: (fn: () => void) => () => void;
-}
-
-const DataEntryContext = createContext<DataEntryContextValue | null>(null);
-
-export function useDataEntry() {
-  const ctx = useContext(DataEntryContext);
-  if (!ctx) throw new Error('useDataEntry must be used within a Layout component');
-  return ctx;
-}
-
-// ─── Layout ───────────────────────────────────────────────────────────────────
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -33,55 +13,7 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
-
-  // Modal state
-  const [isOpen, setIsOpen] = useState(false);
-  const [hasPending, setHasPending] = useState(false);
-
-  // Registry of callbacks to fire after a successful data-entry submit
-  const submittedListeners = useRef<Set<() => void>>(new Set());
-
-  const openModal = useCallback(() => {
-    setIsOpen(true);
-  }, []);
-
-  const closeModal = useCallback(() => {
-    setIsOpen(false);
-    setHasPending(false);
-  }, []);
-
-  const notifySubmitted = useCallback(() => {
-    submittedListeners.current.forEach((fn) => fn());
-  }, []);
-
-  const registerOnSubmitted = useCallback((fn: () => void) => {
-    submittedListeners.current.add(fn);
-    return () => { submittedListeners.current.delete(fn); };
-  }, []);
-
-  const dataEntryCtx: DataEntryContextValue = {
-    open: openModal,
-    close: closeModal,
-    onSubmitted: registerOnSubmitted,
-  };
-
-  // X button / Escape: confirm if pending, then close
-  const handleClose = useCallback(() => {
-    if (hasPending && !window.confirm('Discard pending changes?')) return;
-    closeModal();
-  }, [hasPending, closeModal]);
-
-  // Backdrop click: silently ignore if pending; close if clean
-  const handleBackdropClose = useCallback(() => {
-    if (hasPending) return;
-    closeModal();
-  }, [hasPending, closeModal]);
-
-  // Called by DataEntry after a successful submit — close modal and notify listeners
-  const handleRequestClose = useCallback(() => {
-    closeModal();
-    notifySubmitted();
-  }, [closeModal, notifySubmitted]);
+  const { isOpen, open: openModal } = useDataEntry();
 
   async function handleLogout() {
     await logout();
@@ -91,7 +23,7 @@ export default function Layout({ children }: LayoutProps) {
   const path = location.pathname;
 
   return (
-    <DataEntryContext.Provider value={dataEntryCtx}>
+    <>
       <div className="page-wrapper">
         <nav className="navbar">
           <div className="container">
@@ -153,17 +85,6 @@ export default function Layout({ children }: LayoutProps) {
           </main>
         </div>
       </div>
-
-      <Modal
-        open={isOpen}
-        onClose={handleClose}
-        onBackdropClose={handleBackdropClose}
-      >
-        <DataEntry
-          onRequestClose={handleRequestClose}
-          onPendingChange={setHasPending}
-        />
-      </Modal>
-    </DataEntryContext.Provider>
+    </>
   );
 }

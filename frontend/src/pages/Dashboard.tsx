@@ -37,7 +37,8 @@ import Toast from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
-import Layout, { useDataEntry } from '../components/layout/Layout';
+import Layout from '../components/layout/Layout';
+import { useDataEntry } from '../contexts/DataEntryContext';
 import DangerZone from '../components/DangerZone';
 // Undo-toast payload: what was just deleted, so we can restore it if the
 // user clicks Undo before the timeout fires.

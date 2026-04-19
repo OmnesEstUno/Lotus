@@ -1,5 +1,6 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { isAuthenticated } from './api/client';
+import { DataEntryProvider } from './contexts/DataEntryContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
@@ -12,13 +13,15 @@ function ProtectedRoute({ element }: { element: React.ReactElement }) {
 export default function App() {
   return (
     <HashRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/workspace-invite" element={<WorkspaceInvitePage />} />
-        <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
-        <Route path="/settings" element={<ProtectedRoute element={<Settings />} />} />
-        <Route path="*" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
-      </Routes>
+      <DataEntryProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/workspace-invite" element={<WorkspaceInvitePage />} />
+          <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
+          <Route path="/settings" element={<ProtectedRoute element={<Settings />} />} />
+          <Route path="*" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
+        </Routes>
+      </DataEntryProvider>
     </HashRouter>
   );
 }

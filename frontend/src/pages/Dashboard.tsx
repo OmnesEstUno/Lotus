@@ -33,6 +33,7 @@ import { getCategoryColor } from '../utils/categories';
 import CategoryLineChart, { TIME_RANGE_LABELS } from '../components/charts/CategoryLineChart';
 import ExpenseCategoryTable from '../components/dashboard/ExpenseCategoryTable';
 import YearSelector from '../components/dashboard/YearSelector';
+import AllTransactionsCard from '../components/dashboard/AllTransactionsCard';
 import MonthlyBalanceView from '../components/dashboard/MonthlyBalanceView';
 import ExpandedMonthView from '../components/dashboard/ExpandedMonthView';
 import Toast from '../components/Toast';
@@ -339,6 +340,18 @@ export default function Dashboard() {
             />
           )}
         </div>
+      </div>
+
+      {/* ─── Section 2b: All Transactions ────────────────────────── */}
+      <div className="section">
+        <AllTransactionsCard
+          transactions={transactions}
+          userCategories={userCategories}
+          addCustomCategory={addCustomCategory}
+          onUpdateTransaction={handleUpdateTransaction}
+          onDelete={handleDelete}
+          isActiveOwner={isActiveOwner}
+        />
       </div>
 
       {/* ─── Section 3: Income vs Expenditures ───────────────────── */}

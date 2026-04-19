@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { parseISO, subMonths } from 'date-fns';
 import { Transaction, Category, UserCategories } from '../../types';
 import { updateTransaction } from '../../api/client';
@@ -6,6 +6,12 @@ import { formatCurrency, MONTH_NAMES } from '../../utils/dataProcessing';
 import { getCategoryColor } from '../../utils/categories';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../CategorySelect';
 import { DrillDownRange, DRILL_DOWN_RANGE_LABELS } from './constants';
+
+function autoResize(el: HTMLTextAreaElement) {
+  el.style.height = 'auto';
+  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+  el.style.height = `${el.scrollHeight + lineHeight * 2}px`;
+}
 
 // ─── Expandable Expense Category Table ─────────────────────────────────────
 
@@ -51,11 +57,26 @@ export default function ExpenseCategoryTable({
   const [searchQuery, setSearchQuery] = useState('');
   const [drillDownRange, setDrillDownRange] = useState<DrillDownRange>('year');
   const [editDraft, setEditDraft] = useState<ExpenseEditDraft | null>(null);
+  // Per-row notes draft: keyed by transaction id, populated on focus, committed on blur.
+  const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
+  // Track which note cell is currently focused (for the dual-element display).
+  const [focusedNoteId, setFocusedNoteId] = useState<string | null>(null);
+  const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // After the textarea mounts (focusedNoteId changes), resize it to fit initial content.
+  useEffect(() => {
+    if (focusedNoteId && notesTextareaRef.current) {
+      autoResize(notesTextareaRef.current);
+      notesTextareaRef.current.focus();
+    }
+  }, [focusedNoteId]);
 
   useEffect(() => {
     setSelectedIds(new Set());
     setSearchQuery('');
     setEditDraft(null);
+    setNotesDraft({});
+    setFocusedNoteId(null);
   }, [expandedCategory]);
 
   // Date range filter for the drill-down list only. The outer monthly table
@@ -329,6 +350,7 @@ export default function ExpenseCategoryTable({
                     </th>
                     <th>Date</th>
                     <th>Description</th>
+                    <th style={{ width: 180 }}>Notes</th>
                     <th>Category</th>
                     <th className="num">Amount</th>
                     <th style={{ width: 80 }}></th>
@@ -361,6 +383,7 @@ export default function ExpenseCategoryTable({
                               onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
                             />
                           </td>
+                          <td>{/* Notes edited independently via its own cell */}</td>
                           <td>
                             <CategorySelect
                               value={editDraft.category}
@@ -406,6 +429,9 @@ export default function ExpenseCategoryTable({
                       );
                     }
 
+                    const isFocused = focusedNoteId === t.id;
+                    const currentNote = notesDraft[t.id] ?? t.notes ?? '';
+
                     return (
                       <tr key={t.id} style={isSelected ? { background: 'var(--accent-dim)' } : undefined}>
                         <td>
@@ -417,6 +443,43 @@ export default function ExpenseCategoryTable({
                         </td>
                         <td className="text-sm font-mono" style={{ whiteSpace: 'nowrap' }}>{t.date}</td>
                         <td>{t.description}</td>
+                        <td style={{ maxWidth: 180, verticalAlign: 'top', padding: 0 }}>
+                          {isFocused ? (
+                            <textarea
+                              ref={notesTextareaRef}
+                              className="notes-field notes-focused"
+                              value={currentNote}
+                              onChange={(e) =>
+                                setNotesDraft((prev) => ({ ...prev, [t.id]: e.target.value }))
+                              }
+                              onInput={(e) => autoResize(e.currentTarget)}
+                              onBlur={(e) => {
+                                e.currentTarget.style.height = '';
+                                setFocusedNoteId(null);
+                                const next = e.currentTarget.value;
+                                const prev = t.notes ?? '';
+                                if (next !== prev) {
+                                  onUpdateTransaction(t.id, { notes: next });
+                                }
+                              }}
+                              autoFocus
+                            />
+                          ) : (
+                            <div
+                              className="notes-field notes-idle"
+                              title={currentNote || 'Click to add a note…'}
+                              onClick={() => {
+                                setNotesDraft((prev) => ({
+                                  ...prev,
+                                  [t.id]: t.notes ?? '',
+                                }));
+                                setFocusedNoteId(t.id);
+                              }}
+                            >
+                              {currentNote || <span className="notes-placeholder">Add a note…</span>}
+                            </div>
+                          )}
+                        </td>
                         <td>
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                             <span

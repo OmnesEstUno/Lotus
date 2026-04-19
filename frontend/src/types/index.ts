@@ -40,6 +40,7 @@ export interface Transaction {
   id: string;
   date: string; // ISO date: YYYY-MM-DD
   description: string;
+  notes?: string; // user-editable free text; absent on pre-Task-5 records
   category: Category;
   amount: number; // negative = expense, positive = refund/credit
   type: 'expense' | 'refund';

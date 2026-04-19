@@ -568,3 +568,56 @@ a:hover { color: var(--accent-hover); }
   background: var(--danger-bg);
   color: var(--danger);
 }
+
+/* ─── Notes field (transaction drill-down) ───────────────────────────────── */
+/*
+ * Dual-element approach: an idle <div> shows truncated single-line text;
+ * on click it swaps to a <textarea> that expands to fit content.
+ * A pure-textarea approach was ruled out because <textarea> does not reliably
+ * honor white-space: nowrap + text-overflow: ellipsis cross-browser.
+ */
+.notes-field {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  line-height: 1.35;
+  box-sizing: border-box;
+  display: block;
+}
+
+/* Idle state — clipped single-line <div> */
+.notes-idle {
+  height: 1.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  cursor: text;
+  transition: border-color 0.15s ease;
+}
+.notes-idle:hover {
+  border-color: var(--border);
+}
+
+/* Placeholder text inside the idle <div> */
+.notes-placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Focused state — expanding <textarea> */
+.notes-focused {
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 4px);
+  outline: none;
+  /* Height is set inline by autoResize() */
+  transition: border-color 0.15s ease;
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Category, UserCategories } from '../../types';
 import { TransactionUpdate, IncomeUpdate } from '../../api/client';
 import { formatCurrency } from '../../utils/dataProcessing';
@@ -70,7 +70,7 @@ export default function TransactionDrillDown({
     else { setSortKey(key); setSortDir(key === 'date' ? 'desc' : 'asc'); }
   }
 
-  const sortedEvents = [...events].sort((a, b) => {
+  const sortedEvents = useMemo(() => [...events].sort((a, b) => {
     const dir = sortDir === 'asc' ? 1 : -1;
     switch (sortKey) {
       case 'date': return (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) * dir;
@@ -80,7 +80,7 @@ export default function TransactionDrillDown({
         return (a.category ?? '').localeCompare(b.category ?? '') * dir;
       case 'amount': return (a.amount - b.amount) * dir;
     }
-  });
+  }), [events, sortKey, sortDir]);
 
   // Composite key: "expense:<id>" or "income:<id>" to avoid collisions
   const eventKey = (e: DrillDownEvent) => `${e.kind}:${e.id}`;
@@ -237,18 +237,67 @@ export default function TransactionDrillDown({
                   title="Select all / none"
                 />
               </th>
-              <th onClick={() => toggleSort('date')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                Date{sortKey === 'date' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              <th
+                onClick={() => toggleSort('date')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('date');
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-sort={sortKey === 'date' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Date{sortKey === 'date' ? <span aria-hidden="true">{sortDir === 'asc' ? ' ▲' : ' ▼'}</span> : ''}
               </th>
-              <th onClick={() => toggleSort('description')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                Description{sortKey === 'description' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              <th
+                onClick={() => toggleSort('description')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('description');
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-sort={sortKey === 'description' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Description{sortKey === 'description' ? <span aria-hidden="true">{sortDir === 'asc' ? ' ▲' : ' ▼'}</span> : ''}
               </th>
               <th style={{ width: 180 }}>Notes</th>
-              <th onClick={() => toggleSort('category')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                Category{sortKey === 'category' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              <th
+                onClick={() => toggleSort('category')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('category');
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-sort={sortKey === 'category' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Category{sortKey === 'category' ? <span aria-hidden="true">{sortDir === 'asc' ? ' ▲' : ' ▼'}</span> : ''}
               </th>
-              <th className="num" onClick={() => toggleSort('amount')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                Amount{sortKey === 'amount' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              <th
+                className="num"
+                onClick={() => toggleSort('amount')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('amount');
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-sort={sortKey === 'amount' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Amount{sortKey === 'amount' ? <span aria-hidden="true">{sortDir === 'asc' ? ' ▲' : ' ▼'}</span> : ''}
               </th>
               <th style={{ width: 80 }}></th>
             </tr>

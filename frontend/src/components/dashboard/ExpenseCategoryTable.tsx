@@ -100,11 +100,11 @@ export default function ExpenseCategoryTable({
         <table className="table">
           <thead>
             <tr>
-              <th>Category</th>
+              <th className="sticky-col-left">Category</th>
               {MONTH_NAMES.slice(0, currentMonth + 1).map((m) => (
                 <th key={m} className="num">{m}</th>
               ))}
-              <th className="num">Total</th>
+              <th className="num sticky-col-right">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -116,11 +116,11 @@ export default function ExpenseCategoryTable({
                   onClick={() => onSelect(row.category)}
                   style={{
                     cursor: 'pointer',
-                    background: isExpanded ? 'var(--accent-dim)' : undefined,
+                    background: isExpanded ? 'var(--accent-dim)' : 'var(--bg-card)',
                   }}
                   title={isExpanded ? 'Click to collapse' : 'Click to view transactions'}
                 >
-                  <td>
+                  <td className="sticky-col-left">
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       <span
                         style={{
@@ -150,7 +150,7 @@ export default function ExpenseCategoryTable({
                       {amt > 0 ? formatCurrency(amt) : '—'}
                     </td>
                   ))}
-                  <td className="num" style={{ fontWeight: 600 }}>
+                  <td className="num sticky-col-right" style={{ fontWeight: 600 }}>
                     {formatCurrency(row.total)}
                   </td>
                 </tr>
@@ -158,7 +158,7 @@ export default function ExpenseCategoryTable({
             })}
             {!expandedCategory && (
               <tr style={{ background: 'var(--bg-elevated)', fontWeight: 600 }}>
-                <td>Total</td>
+                <td className="sticky-col-left">Total</td>
                 {MONTH_NAMES.slice(0, currentMonth + 1).map((_, mi) => {
                   const monthTotal = monthlyTable.reduce((s, r) => s + r.months[mi], 0);
                   return (
@@ -167,7 +167,7 @@ export default function ExpenseCategoryTable({
                     </td>
                   );
                 })}
-                <td className="num">
+                <td className="num sticky-col-right">
                   {formatCurrency(monthlyTable.reduce((s, r) => s + r.total, 0))}
                 </td>
               </tr>

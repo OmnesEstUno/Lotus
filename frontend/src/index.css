@@ -270,6 +270,25 @@ a:hover { color: var(--accent-hover); }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .table .zero { color: var(--text-muted); }
 
+/* Sticky outer columns (first/last) used by the Expenses by Category
+   table. Inherit the row's background so expanded/totals/hover states
+   still look right when scrolled horizontally. */
+.table .sticky-col-left,
+.table .sticky-col-right {
+  position: sticky;
+  background: inherit;
+  z-index: 1;
+}
+.table .sticky-col-left { left: 0; }
+.table .sticky-col-right { right: 0; }
+.table thead .sticky-col-left,
+.table thead .sticky-col-right {
+  z-index: 3;
+  background: var(--bg-card);
+}
+.table tbody tr:hover .sticky-col-left,
+.table tbody tr:hover .sticky-col-right { background: var(--bg-surface); }
+
 /* ─── Tabs ───────────────────────────────────────────────────────────────── */
 .tabs {
   display: flex;

@@ -568,3 +568,72 @@ a:hover { color: var(--accent-hover); }
   background: var(--danger-bg);
   color: var(--danger);
 }
+
+/* ─── Notes field (transaction drill-down) ───────────────────────────────── */
+/*
+ * Dual-element approach: an idle <div> shows multi-line pre-wrapped text;
+ * on click it swaps to a <textarea> that expands to fit content.
+ * The idle div preserves newlines and grows vertically with the content,
+ * which in turn grows the hosting table row naturally.
+ */
+.notes-field {
+  width: 100%;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  line-height: 1.35;
+  box-sizing: border-box;
+  display: block;
+}
+
+/* Idle state — multi-line pre-wrapped <div> */
+.notes-idle {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 6px;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  line-height: 1.35;
+  cursor: text;
+  min-height: 1.9em;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition: border-color 0.15s ease;
+}
+.notes-idle:hover {
+  border-color: var(--border-subtle);
+}
+
+/* Placeholder text inside the idle <div> */
+.notes-placeholder {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 6px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-style: italic;
+  font-family: inherit;
+  line-height: 1.35;
+  cursor: text;
+  min-height: 1.9em;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition: border-color 0.15s ease;
+}
+.notes-placeholder:hover {
+  border-color: var(--border-subtle);
+}
+
+/* Focused state — expanding <textarea> */
+.notes-focused {
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 4px);
+  outline: none;
+  /* Height is set inline by autoResize() */
+  transition: border-color 0.15s ease;
+}

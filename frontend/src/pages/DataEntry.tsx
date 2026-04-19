@@ -283,6 +283,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
           return {
             date: row.date,
             description: row.description,
+            notes: '',
             category: row.category,
             amount: row.amount,
             type: row.type,
@@ -392,6 +393,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
     await submitManualExpense({
       date: manualDate,
       description: manualDesc.trim(),
+      notes: '',
       category: manualCategory,
       amount: -amt,
       type: 'expense',

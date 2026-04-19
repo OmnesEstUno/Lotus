@@ -202,7 +202,7 @@ export async function addTransactions(
   });
 }
 
-export type TransactionUpdate = Partial<Pick<Transaction, 'date' | 'description' | 'category' | 'amount'>>;
+export type TransactionUpdate = Partial<Pick<Transaction, 'date' | 'description' | 'category' | 'amount' | 'notes'>>;
 
 export async function updateTransaction(id: string, updates: TransactionUpdate): Promise<Transaction> {
   return request(`/api/transactions/${id}`, {

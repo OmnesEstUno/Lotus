@@ -194,7 +194,7 @@ function getDummyHash(): Promise<string> {
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
 
-type Transaction = { id: string; date: string; description: string; category: string; amount: number; type: string; source: string };
+type Transaction = { id: string; date: string; description: string; notes: string; category: string; amount: number; type: string; source: string };
 type TaxBreakdown = { federal: number; state: number; socialSecurity: number; medicare: number; other: number };
 type IncomeEntry = { id: string; date: string; description: string; grossAmount: number; netAmount: number; taxes: TaxBreakdown; source: string };
 
@@ -804,7 +804,7 @@ export default {
             }
             seen.add(key);
           }
-          added.push({ ...t, id: generateId() });
+          added.push({ ...t, notes: t.notes ?? '', id: generateId() });
         }
 
         const txPrefix = instanceKey(instanceId, 'data:transactions');
@@ -836,6 +836,7 @@ export default {
           description?: string;
           category?: string;
           amount?: number;
+          notes?: string;
         };
         // Build only the fields explicitly provided so updateInAnyYear merges correctly.
         const patch: Partial<Transaction> = {};
@@ -843,6 +844,7 @@ export default {
         if (typeof body.description === 'string') patch.description = body.description;
         if (typeof body.category === 'string' && body.category) patch.category = body.category;
         if (typeof body.amount === 'number' && !isNaN(body.amount)) patch.amount = body.amount;
+        if (typeof body.notes === 'string') patch.notes = body.notes;
 
         const updated = await updateInAnyYear<Transaction>(
           env.FINANCE_KV,
@@ -913,6 +915,7 @@ export default {
                 id: generateId(),
                 date: entry.date,
                 description: `${label} — ${entry.description}`,
+                notes: '',
                 category: 'Taxes',
                 amount: -amt,
                 type: 'expense' as const,

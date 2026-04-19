@@ -4,18 +4,10 @@ import { Transaction, Category, UserCategories } from '../../types';
 import { updateTransaction } from '../../api/client';
 import { formatCurrency, MONTH_NAMES } from '../../utils/dataProcessing';
 import { getCategoryColor } from '../../utils/categories';
-import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../CategorySelect';
 import { DrillDownRange, DRILL_DOWN_RANGE_LABELS } from './constants';
+import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 
 // ─── Expandable Expense Category Table ─────────────────────────────────────
-
-interface ExpenseEditDraft {
-  id: string;
-  date: string;
-  description: string;
-  category: Category;
-  amount: string; // input value, parsed on save
-}
 
 interface ExpenseCategoryTableProps {
   monthlyTable: Array<{ category: Category; months: number[]; total: number }>;
@@ -44,22 +36,14 @@ export default function ExpenseCategoryTable({
     ? monthlyTable.filter((r) => r.category === expandedCategory)
     : monthlyTable;
 
-  // Multi-select state for the drill-down. Cleared whenever the expanded
-  // category changes (so selections don't leak between categories).
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [drillDownRange, setDrillDownRange] = useState<DrillDownRange>('year');
-  const [editDraft, setEditDraft] = useState<ExpenseEditDraft | null>(null);
 
   useEffect(() => {
-    setSelectedIds(new Set());
     setSearchQuery('');
-    setEditDraft(null);
   }, [expandedCategory]);
 
-  // Date range filter for the drill-down list only. The outer monthly table
-  // always shows the current year — that's the contract of that section.
+  // Date range filter for the drill-down list only.
   const { start: rangeStart, end: rangeEnd } = (() => {
     const now = new Date();
     switch (drillDownRange) {
@@ -92,92 +76,20 @@ export default function ExpenseCategoryTable({
       )
     : categoryTransactionsAll;
 
-  function toggleOne(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  // Transform Transaction[] into the unified DrillDownEvent[] shape
+  const drillDownEvents: DrillDownEvent[] = categoryTransactions.map((t) => ({
+    id: t.id,
+    kind: 'expense',
+    date: t.date,
+    description: t.description,
+    category: t.category,
+    amount: Math.abs(t.amount),
+    notes: t.notes,
+  }));
 
-  function toggleAll() {
-    setSelectedIds((prev) => {
-      if (prev.size === categoryTransactions.length) return new Set();
-      return new Set(categoryTransactions.map((t) => t.id));
-    });
-  }
-
-  async function deleteSelected() {
-    if (selectedIds.size === 0) return;
-    const n = selectedIds.size;
-    if (!window.confirm(`Delete ${n} selected transaction${n !== 1 ? 's' : ''}?`)) return;
-    setBusy(true);
-    try {
-      await onDelete([...selectedIds], [], `Deleted ${n} transaction${n !== 1 ? 's' : ''} from ${expandedCategory}.`);
-      setSelectedIds(new Set());
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteOne(t: Transaction) {
-    if (!window.confirm(`Delete "${t.description}"?`)) return;
-    setBusy(true);
-    try {
-      await onDelete([t.id], [], `Deleted "${t.description}".`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function startEdit(t: Transaction) {
-    setEditDraft({
-      id: t.id,
-      date: t.date,
-      description: t.description,
-      category: t.category,
-      amount: Math.abs(t.amount).toFixed(2),
-    });
-  }
-
-  function cancelEdit() {
-    setEditDraft(null);
-  }
-
-  async function saveEdit() {
-    if (!editDraft) return;
-    const amt = parseFloat(editDraft.amount);
-    if (isNaN(amt) || amt <= 0) {
-      window.alert('Please enter a valid positive amount.');
-      return;
-    }
-    setBusy(true);
-    try {
-      await onUpdateTransaction(editDraft.id, {
-        date: editDraft.date,
-        description: editDraft.description.trim(),
-        category: editDraft.category,
-        amount: -amt, // stored as negative for expenses
-      });
-      setEditDraft(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function handleEditCategoryPick(picked: string) {
-    if (!editDraft) return;
-    if (picked === NEW_CATEGORY_SENTINEL) {
-      const input = window.prompt('Name for the new category:');
-      if (!input) return;
-      const name = addCustomCategory(input);
-      if (!name) return;
-      setEditDraft({ ...editDraft, category: name });
-      return;
-    }
-    setEditDraft({ ...editDraft, category: picked });
-  }
+  const emptyMessage = searchQuery.trim()
+    ? `No transactions matching "${searchQuery}" in this category.`
+    : 'No transactions in this category for the selected date range.';
 
   return (
     <>
@@ -282,15 +194,6 @@ export default function ExpenseCategoryTable({
                   <option key={r} value={r}>{DRILL_DOWN_RANGE_LABELS[r]}</option>
                 ))}
               </select>
-              {selectedIds.size > 0 && (
-                <button
-                  className="btn btn-sm btn-danger"
-                  onClick={deleteSelected}
-                  disabled={busy}
-                >
-                  {busy ? <span className="spinner" /> : `Delete selected (${selectedIds.size})`}
-                </button>
-              )}
             </div>
           </div>
 
@@ -303,170 +206,19 @@ export default function ExpenseCategoryTable({
             style={{ marginBottom: 12, maxWidth: 360 }}
           />
 
-          {categoryTransactions.length === 0 ? (
-            <p className="text-muted text-sm">
-              {searchQuery.trim()
-                ? `No transactions matching "${searchQuery}" in this category.`
-                : 'No transactions in this category for the selected date range.'}
-            </p>
-          ) : (
-            <div className="preview-scroll" style={{ maxHeight: 420 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 32 }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.size === categoryTransactions.length && categoryTransactions.length > 0}
-                        ref={(el) => {
-                          if (el) {
-                            el.indeterminate = selectedIds.size > 0 && selectedIds.size < categoryTransactions.length;
-                          }
-                        }}
-                        onChange={toggleAll}
-                        title="Select all / none"
-                      />
-                    </th>
-                    <th>Date</th>
-                    <th>Description</th>
-                    <th>Category</th>
-                    <th className="num">Amount</th>
-                    <th style={{ width: 80 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categoryTransactions.map((t) => {
-                    const isSelected = selectedIds.has(t.id);
-                    const isEditing = editDraft?.id === t.id;
-
-                    if (isEditing) {
-                      return (
-                        <tr key={t.id} style={{ background: 'var(--accent-dim)' }}>
-                          <td></td>
-                          <td>
-                            <input
-                              type="date"
-                              className="input"
-                              style={{ padding: '4px 8px', fontSize: '0.8125rem' }}
-                              value={editDraft.date}
-                              onChange={(e) => setEditDraft({ ...editDraft, date: e.target.value })}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              className="input"
-                              style={{ padding: '4px 8px', fontSize: '0.8125rem' }}
-                              value={editDraft.description}
-                              onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
-                            />
-                          </td>
-                          <td>
-                            <CategorySelect
-                              value={editDraft.category}
-                              customCategories={userCategories.customCategories}
-                              onChange={handleEditCategoryPick}
-                              compact
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              className="input num"
-                              style={{ padding: '4px 8px', fontSize: '0.8125rem' }}
-                              value={editDraft.amount}
-                              onChange={(e) => setEditDraft({ ...editDraft, amount: e.target.value })}
-                            />
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                              <button
-                                className="btn btn-sm btn-primary"
-                                onClick={saveEdit}
-                                disabled={busy}
-                                title="Save"
-                                style={{ padding: '4px 8px' }}
-                              >
-                                ✓
-                              </button>
-                              <button
-                                className="btn btn-sm btn-ghost"
-                                onClick={cancelEdit}
-                                disabled={busy}
-                                title="Cancel"
-                                style={{ padding: '4px 8px' }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return (
-                      <tr key={t.id} style={isSelected ? { background: 'var(--accent-dim)' } : undefined}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleOne(t.id)}
-                          />
-                        </td>
-                        <td className="text-sm font-mono" style={{ whiteSpace: 'nowrap' }}>{t.date}</td>
-                        <td>{t.description}</td>
-                        <td>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <span
-                              style={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: '50%',
-                                background: getCategoryColor(t.category),
-                                flexShrink: 0,
-                              }}
-                            />
-                            {t.category}
-                          </span>
-                        </td>
-                        <td className="num text-danger">{formatCurrency(Math.abs(t.amount))}</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 2 }}>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => startEdit(t)}
-                              disabled={busy}
-                              title="Edit"
-                              style={{ padding: '4px 8px' }}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                              </svg>
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => deleteOne(t)}
-                              disabled={busy}
-                              title="Delete"
-                              style={{ padding: '4px 8px' }}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              </svg>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <TransactionDrillDown
+            events={drillDownEvents}
+            onDeleteMany={(txnIds, incIds) =>
+              onDelete(txnIds, incIds, `Deleted ${txnIds.length} transaction${txnIds.length !== 1 ? 's' : ''} from ${expandedCategory}.`)
+            }
+            onDeleteOne={(event) =>
+              onDelete([event.id], [], `Deleted "${event.description}".`)
+            }
+            onUpdateTransaction={onUpdateTransaction}
+            userCategories={userCategories}
+            addCustomCategory={addCustomCategory}
+            emptyMessage={emptyMessage}
+          />
         </div>
       )}
     </>

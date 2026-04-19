@@ -1,5 +1,13 @@
-import { format, startOfWeek, startOfMonth, startOfYear, subDays, subMonths, parseISO, isWithinInterval } from 'date-fns';
+import { format, startOfWeek, startOfMonth, subDays, subMonths, parseISO, isWithinInterval } from 'date-fns';
 import { Category, CustomDateRange, IncomeEntry, TimeRange, Transaction } from '../types';
+
+export function filterByRange(
+  transactions: Transaction[],
+  range: CustomDateRange | null,
+): Transaction[] {
+  if (!range) return transactions;
+  return transactions.filter((t) => t.date >= range.start && t.date <= range.end);
+}
 
 /**
  * Return every distinct category that has at least one expense transaction,
@@ -127,33 +135,71 @@ export interface MonthlyExpenseRow {
   total: number;
 }
 
+export interface MonthColumn {
+  year: number;
+  month: number; // 0-indexed
+}
+
+export interface MonthlyTableResult {
+  columns: MonthColumn[];
+  rows: Array<{ category: Category; months: number[]; total: number }>;
+}
+
 export function buildMonthlyExpenseTable(
   transactions: Transaction[],
-  year: number = new Date().getFullYear(),
-): MonthlyExpenseRow[] {
-  const yearStart = startOfYear(new Date(year, 0, 1));
-  const yearEnd = new Date(year, 11, 31, 23, 59, 59);
+  yearOrRange: number | CustomDateRange,
+): MonthlyTableResult {
+  let columns: MonthColumn[];
+  let filtered: Transaction[];
 
-  // Derive categories from the data so custom categories appear automatically.
-  const map = new Map<Category, number[]>();
+  if (typeof yearOrRange === 'number') {
+    const year = yearOrRange;
+    const now = new Date();
+    const lastMonth = year < now.getFullYear() ? 11 : now.getMonth();
+    columns = [];
+    for (let m = 0; m <= lastMonth; m++) columns.push({ year, month: m });
+    filtered = transactions.filter((t) => {
+      if (t.archived || t.type !== 'expense') return false;
+      return parseISO(t.date).getFullYear() === year;
+    });
+  } else {
+    const { start, end } = yearOrRange;
+    const startDate = parseISO(start);
+    const endDate = parseISO(end);
+    columns = [];
+    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const stop = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    while (cur <= stop) {
+      columns.push({ year: cur.getFullYear(), month: cur.getMonth() });
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    filtered = transactions.filter((t) => {
+      if (t.archived || t.type !== 'expense') return false;
+      return t.date >= start && t.date <= end;
+    });
+  }
 
-  transactions.forEach((t) => {
-    if (t.archived) return;
-    if (t.type !== 'expense') return;
+  const colIndex = new Map<string, number>();
+  columns.forEach((c, i) => colIndex.set(`${c.year}-${c.month}`, i));
+  const byCategory = new Map<Category, number[]>();
+  for (const t of filtered) {
     const d = parseISO(t.date);
-    if (!isWithinInterval(d, { start: yearStart, end: yearEnd })) return;
-    const month = d.getMonth(); // 0-indexed
-    if (!map.has(t.category)) map.set(t.category, new Array(12).fill(0));
-    map.get(t.category)![month] += Math.abs(t.amount);
-  });
+    const idx = colIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
+    if (idx === undefined) continue;
+    const bucket = byCategory.get(t.category) ?? new Array(columns.length).fill(0);
+    bucket[idx] += Math.abs(t.amount);
+    byCategory.set(t.category, bucket);
+  }
 
-  return [...map.entries()]
-    .map(([category, months]) => {
-      const total = months.reduce((s, v) => s + v, 0);
-      return { category, months, total };
-    })
-    .filter((row) => row.total > 0)
+  const rows = Array.from(byCategory.entries())
+    .map(([category, months]) => ({
+      category,
+      months,
+      total: months.reduce((s, v) => s + v, 0),
+    }))
     .sort((a, b) => b.total - a.total);
+
+  return { columns, rows };
 }
 
 // ─── Income vs Expenditures ──────────────────────────────────────────────────

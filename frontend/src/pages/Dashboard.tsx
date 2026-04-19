@@ -33,6 +33,7 @@ import {
   buildMonthlyExpenseTable,
   buildMonthlyBalance,
   buildCategoryAverages,
+  filterByRange,
   formatCurrency,
   getTrackedDuration,
   MONTH_NAMES,
@@ -41,7 +42,8 @@ import { getCategoryColor } from '../utils/categories';
 import CategoryLineChart from '../components/charts/CategoryLineChart';
 import ExpenseCategoryTable from '../components/dashboard/ExpenseCategoryTable';
 import TimeRangeSelector from '../components/dashboard/TimeRangeSelector';
-import YearSelector from '../components/dashboard/YearSelector';
+import YearSelector, { CUSTOM_RANGE } from '../components/dashboard/YearSelector';
+import DateRangePicker from '../components/DateRangePicker';
 import AllTransactionsCard from '../components/dashboard/AllTransactionsCard';
 import MonthlyBalanceView from '../components/dashboard/MonthlyBalanceView';
 import NetBalanceView from '../components/dashboard/NetBalanceView';
@@ -96,6 +98,8 @@ export default function Dashboard() {
   const [expandedCategory, setExpandedCategory] = useState<Category | null>(null);
   const [expandedMonth, setExpandedMonth] = useState<number | null>(null);
   const [expenseYear, setExpenseYear] = useState(new Date().getFullYear());
+  const [expenseRange, setExpenseRange] = useState<CustomDateRange | null>(null);
+  const [avgRange, setAvgRange] = useState<CustomDateRange | null>(null);
   const [incomeYear, setIncomeYear] = useState(new Date().getFullYear());
 
   // Card layout state: order + which cards are minimized. Persisted per
@@ -374,13 +378,17 @@ export default function Dashboard() {
   const totalIncome = income.reduce((s, e) => s + e.netAmount, 0);
   const surplus = totalIncome - totalExpenses;
 
-  const monthlyTable = buildMonthlyExpenseTable(transactions, expenseYear);
+  const monthlyResult = buildMonthlyExpenseTable(
+    transactions,
+    expenseRange ?? expenseYear,
+  );
+  const monthlyTable = monthlyResult.rows;
+  const monthColumns = monthlyResult.columns;
   const monthlyBalance = buildMonthlyBalance(transactions, income, incomeYear);
   const categoryAverages = buildCategoryAverages(transactions);
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth();
-  // For past years show the full calendar; for the current year truncate at the current month.
-  const expenseMonthCount = expenseYear < currentYear ? 12 : currentMonth + 1;
+  const categoryAveragesRanged = avgRange
+    ? buildCategoryAverages(filterByRange(transactions, avgRange))
+    : categoryAverages;
 
   // Map each card id to its rendered node. Rendered inside a SortableContext
   // below in the saved order.
@@ -422,7 +430,23 @@ export default function Dashboard() {
             onToggleMinimize={toggle}
             headerActions={
               <>
-                <YearSelector transactions={transactions} value={expenseYear} onChange={setExpenseYear} />
+                <YearSelector
+                  transactions={transactions}
+                  value={expenseRange ? CUSTOM_RANGE : expenseYear}
+                  onChange={(y) => {
+                    if (y === CUSTOM_RANGE) {
+                      const today = new Date();
+                      setExpenseRange({
+                        start: `${today.getFullYear() - 1}-${String(today.getMonth() + 1).padStart(2, '0')}-01`,
+                        end: today.toISOString().slice(0, 10),
+                      });
+                    } else {
+                      setExpenseRange(null);
+                      setExpenseYear(y);
+                    }
+                  }}
+                  customOption
+                />
                 {expandedCategory && (
                   <button className="btn btn-ghost btn-sm" onClick={() => setExpandedCategory(null)}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -434,13 +458,30 @@ export default function Dashboard() {
               </>
             }
           >
+            {expenseRange && (() => {
+              const today = new Date();
+              const tenYearsAgo = new Date(today.getFullYear() - 10, today.getMonth(), today.getDate());
+              const oldest = transactions.filter((t) => !t.archived).map((t) => t.date).sort()[0];
+              const tenYrStr = tenYearsAgo.toISOString().slice(0, 10);
+              const minDate = oldest && oldest > tenYrStr ? oldest : tenYrStr;
+              return (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                  <DateRangePicker
+                    value={expenseRange}
+                    onChange={setExpenseRange}
+                    minDate={minDate}
+                    maxDate={today.toISOString().slice(0, 10)}
+                  />
+                </div>
+              );
+            })()}
             {monthlyTable.length === 0 ? (
               <EmptyState message={`No expense data for ${expenseYear}.`} />
             ) : (
               <ExpenseCategoryTable
                 monthlyTable={monthlyTable}
+                columns={monthColumns}
                 transactions={transactions}
-                currentMonth={expenseMonthCount - 1}
                 expandedCategory={expandedCategory}
                 onSelect={(c) => setExpandedCategory(c === expandedCategory ? null : c)}
                 onDelete={handleDelete}
@@ -528,12 +569,47 @@ export default function Dashboard() {
             minimized={isMin}
             onToggleMinimize={toggle}
             headerActions={
-              <span className="text-xs text-muted">
-                Over {categoryAverages[0]?.months ?? 0} month{(categoryAverages[0]?.months ?? 0) !== 1 ? 's' : ''} of data
-              </span>
+              <>
+                <YearSelector
+                  transactions={transactions}
+                  value={avgRange ? CUSTOM_RANGE : new Date().getFullYear()}
+                  onChange={(y) => {
+                    if (y === CUSTOM_RANGE) {
+                      const today = new Date();
+                      setAvgRange({
+                        start: `${today.getFullYear() - 1}-${String(today.getMonth() + 1).padStart(2, '0')}-01`,
+                        end: today.toISOString().slice(0, 10),
+                      });
+                    } else {
+                      setAvgRange(null);
+                    }
+                  }}
+                  customOption
+                />
+                <span className="text-xs text-muted">
+                  Over {categoryAveragesRanged[0]?.months ?? 0} month{(categoryAveragesRanged[0]?.months ?? 0) !== 1 ? 's' : ''} of data
+                </span>
+              </>
             }
           >
-            {categoryAverages.length === 0 ? (
+            {avgRange && (() => {
+              const today = new Date();
+              const tenYearsAgo = new Date(today.getFullYear() - 10, today.getMonth(), today.getDate());
+              const oldest = transactions.filter((t) => !t.archived).map((t) => t.date).sort()[0];
+              const tenYrStr = tenYearsAgo.toISOString().slice(0, 10);
+              const minDate = oldest && oldest > tenYrStr ? oldest : tenYrStr;
+              return (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                  <DateRangePicker
+                    value={avgRange}
+                    onChange={setAvgRange}
+                    minDate={minDate}
+                    maxDate={today.toISOString().slice(0, 10)}
+                  />
+                </div>
+              );
+            })()}
+            {categoryAveragesRanged.length === 0 ? (
               <EmptyState message="No expense data available yet." />
             ) : (
               <>
@@ -548,10 +624,10 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {categoryAverages
+                      {categoryAveragesRanged
                         .sort((a, b) => b.avgPerMonth - a.avgPerMonth)
                         .map((row) => {
-                          const maxAvg = categoryAverages.reduce((m, r) => Math.max(m, r.avgPerMonth), 0);
+                          const maxAvg = categoryAveragesRanged.reduce((m, r) => Math.max(m, r.avgPerMonth), 0);
                           const pct = maxAvg > 0 ? (row.avgPerMonth / maxAvg) * 100 : 0;
                           return (
                             <tr key={row.category}>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { parseISO, subMonths } from 'date-fns';
 import { Transaction, Category, UserCategories } from '../../types';
 import { updateTransaction } from '../../api/client';
-import { formatCurrency, MONTH_NAMES } from '../../utils/dataProcessing';
+import { MonthColumn, formatCurrency, MONTH_NAMES } from '../../utils/dataProcessing';
 import { getCategoryColor } from '../../utils/categories';
 import { DrillDownRange, DRILL_DOWN_RANGE_LABELS } from './constants';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
@@ -11,8 +11,8 @@ import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 
 interface ExpenseCategoryTableProps {
   monthlyTable: Array<{ category: Category; months: number[]; total: number }>;
+  columns: MonthColumn[];
   transactions: Transaction[];
-  currentMonth: number;
   expandedCategory: Category | null;
   onSelect: (category: Category) => void;
   onDelete: (txnIds: string[], incIds: string[], label: string) => Promise<void>;
@@ -24,8 +24,8 @@ interface ExpenseCategoryTableProps {
 
 export default function ExpenseCategoryTable({
   monthlyTable,
+  columns,
   transactions,
-  currentMonth,
   expandedCategory,
   onSelect,
   onDelete,
@@ -34,6 +34,7 @@ export default function ExpenseCategoryTable({
   addCustomCategory,
   isActiveOwner = true,
 }: ExpenseCategoryTableProps) {
+  const showYearSublabel = new Set(columns.map((c) => c.year)).size > 1;
   const visibleRows = expandedCategory
     ? monthlyTable.filter((r) => r.category === expandedCategory)
     : monthlyTable;
@@ -101,8 +102,15 @@ export default function ExpenseCategoryTable({
           <thead>
             <tr>
               <th className="sticky-col-left">Category</th>
-              {MONTH_NAMES.slice(0, currentMonth + 1).map((m) => (
-                <th key={m} className="num">{m}</th>
+              {columns.map((c, ci) => (
+                <th key={ci} className="num">
+                  <div>{MONTH_NAMES[c.month]}</div>
+                  {showYearSublabel && (
+                    <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--text-muted)' }}>
+                      {c.year}
+                    </div>
+                  )}
+                </th>
               ))}
               <th className="num sticky-col-right">Total</th>
             </tr>
@@ -145,7 +153,7 @@ export default function ExpenseCategoryTable({
                       </svg>
                     </span>
                   </td>
-                  {row.months.slice(0, currentMonth + 1).map((amt, mi) => (
+                  {row.months.map((amt, mi) => (
                     <td key={mi} className={`num ${amt === 0 ? 'zero' : ''}`}>
                       {amt > 0 ? formatCurrency(amt) : '—'}
                     </td>
@@ -159,7 +167,7 @@ export default function ExpenseCategoryTable({
             {!expandedCategory && (
               <tr style={{ background: 'var(--bg-elevated)', fontWeight: 600 }}>
                 <td className="sticky-col-left">Total</td>
-                {MONTH_NAMES.slice(0, currentMonth + 1).map((_, mi) => {
+                {columns.map((_, mi) => {
                   const monthTotal = monthlyTable.reduce((s, r) => s + r.months[mi], 0);
                   return (
                     <td key={mi} className="num">

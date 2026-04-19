@@ -1,4 +1,4 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 import { formatCurrency } from '../../utils/dataProcessing';
 import { formatAxisCurrency } from './constants';
 
@@ -11,13 +11,14 @@ export default function NetBalanceView({ monthlyBalance }: Props) {
     <ResponsiveContainer width="100%" height={240}>
       <BarChart data={monthlyBalance} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <ReferenceLine y={0} stroke="var(--text-muted)" strokeWidth={1} />
         <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
         <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
         <Tooltip
           contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.8125rem' }}
           formatter={(v: number) => [formatCurrency(v), v >= 0 ? 'Surplus' : 'Deficit']}
         />
-        <Bar dataKey="surplus" radius={[3, 3, 0, 0]}>
+        <Bar dataKey="surplus" radius={[3, 3, 0, 0]} fillOpacity={0.5}>
           {monthlyBalance.map((entry, i) => (
             <Cell key={i} fill={entry.surplus >= 0 ? '#4ade80' : '#f87171'} />
           ))}

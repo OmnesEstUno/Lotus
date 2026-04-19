@@ -41,6 +41,7 @@ export interface Transaction {
   date: string; // ISO date: YYYY-MM-DD
   description: string;
   notes?: string; // user-editable free text; absent on pre-Task-5 records
+  archived?: boolean; // when true: hidden from charts/aggregates but counted in totals
   category: Category;
   amount: number; // negative = expense, positive = refund/credit
   type: 'expense' | 'refund';

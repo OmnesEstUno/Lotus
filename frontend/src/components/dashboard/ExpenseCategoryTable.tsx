@@ -61,6 +61,7 @@ export default function ExpenseCategoryTable({
   const categoryTransactionsAll = expandedCategory
     ? transactions
         .filter((t) => {
+          if (t.archived) return false;
           if (t.type !== 'expense') return false;
           if (t.category !== expandedCategory) return false;
           const d = parseISO(t.date);

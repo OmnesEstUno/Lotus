@@ -365,6 +365,21 @@ export default function TransactionDrillDown({
                           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                         </svg>
                       </button>
+                      {e.kind === 'expense' && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => onUpdateTransaction(e.id, { archived: true })}
+                          disabled={busy}
+                          title="Archive"
+                          style={{ padding: '4px 8px' }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="21 8 21 21 3 21 3 8" />
+                            <rect x="1" y="3" width="22" height="5" />
+                            <line x1="10" y1="12" x2="14" y2="12" />
+                          </svg>
+                        </button>
+                      )}
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => handleDeleteOne(e)}

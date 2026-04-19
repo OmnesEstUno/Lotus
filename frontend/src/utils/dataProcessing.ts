@@ -9,6 +9,7 @@ import { Category, IncomeEntry, TimeRange, Transaction } from '../types';
 export function getTrendingCategories(transactions: Transaction[]): Category[] {
   const set = new Set<Category>();
   for (const t of transactions) {
+    if (t.archived) continue;
     if (t.type !== 'expense') continue;
     if (t.category === 'Taxes') continue;
     set.add(t.category);
@@ -64,8 +65,9 @@ export function buildLineChartData(transactions: Transaction[], range: TimeRange
   const { start, end } = getDateRange(range);
   const getKey = groupByPeriod(range);
 
-  // Filter only expenses in the date range (exclude Taxes from trending)
+  // Filter only expenses in the date range (exclude Taxes from trending, exclude archived)
   const filtered = transactions.filter((t) => {
+    if (t.archived) return false;
     if (t.type !== 'expense') return false;
     if (t.category === 'Taxes') return false;
     const d = parseISO(t.date);
@@ -118,6 +120,7 @@ export function buildMonthlyExpenseTable(transactions: Transaction[]): MonthlyEx
   const map = new Map<Category, number[]>();
 
   transactions.forEach((t) => {
+    if (t.archived) return;
     if (t.type !== 'expense') return;
     const d = parseISO(t.date);
     if (!isWithinInterval(d, { start: yearStart, end: yearEnd })) return;
@@ -152,6 +155,7 @@ export function buildMonthlyBalance(transactions: Transaction[], incomeEntries: 
   const incomeByMonth = new Array(12).fill(0);
 
   transactions.forEach((t) => {
+    if (t.archived) return;
     if (t.type !== 'expense') return;
     const d = parseISO(t.date);
     if (d.getFullYear() !== year) return;
@@ -198,6 +202,7 @@ export function buildDailyBalance(
   }
 
   transactions.forEach((t) => {
+    if (t.archived) return;
     if (t.type !== 'expense') return;
     const d = parseISO(t.date);
     if (d.getFullYear() !== year || d.getMonth() !== month) return;
@@ -232,6 +237,7 @@ export function buildMonthEvents(
   const events: MonthEvent[] = [];
 
   transactions.forEach((t) => {
+    if (t.archived) return;
     if (t.type !== 'expense') return;
     const d = parseISO(t.date);
     if (d.getFullYear() !== year || d.getMonth() !== month) return;
@@ -276,7 +282,7 @@ export interface CategoryAverage {
 export function buildCategoryAverages(transactions: Transaction[]): CategoryAverage[] {
   if (transactions.length === 0) return [];
 
-  const expenses = transactions.filter((t) => t.type === 'expense');
+  const expenses = transactions.filter((t) => !t.archived && t.type === 'expense');
   if (expenses.length === 0) return [];
 
   // Find overall date range

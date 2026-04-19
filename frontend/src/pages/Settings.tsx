@@ -6,6 +6,7 @@ import { getCategoryColor } from '../utils/categories';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import InviteTokensCard from '../components/InviteTokensCard';
 import WorkspacesCard from '../components/WorkspacesCard';
+import ArchivedCard from '../components/dashboard/ArchivedCard';
 import Layout from '../components/layout/Layout';
 
 /**
@@ -307,6 +308,9 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      {/* ─── Archived Transactions ────────────────────────── */}
+      <ArchivedCard />
     </Layout>
   );
 }

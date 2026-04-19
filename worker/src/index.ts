@@ -194,7 +194,7 @@ function getDummyHash(): Promise<string> {
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
 
-type Transaction = { id: string; date: string; description: string; notes: string; category: string; amount: number; type: string; source: string };
+type Transaction = { id: string; date: string; description: string; notes: string; archived?: boolean; category: string; amount: number; type: string; source: string };
 type TaxBreakdown = { federal: number; state: number; socialSecurity: number; medicare: number; other: number };
 type IncomeEntry = { id: string; date: string; description: string; grossAmount: number; netAmount: number; taxes: TaxBreakdown; source: string };
 
@@ -837,6 +837,7 @@ export default {
           category?: string;
           amount?: number;
           notes?: string;
+          archived?: boolean;
         };
         // Build only the fields explicitly provided so updateInAnyYear merges correctly.
         const patch: Partial<Transaction> = {};
@@ -845,6 +846,7 @@ export default {
         if (typeof body.category === 'string' && body.category) patch.category = body.category;
         if (typeof body.amount === 'number' && !isNaN(body.amount)) patch.amount = body.amount;
         if (typeof body.notes === 'string') patch.notes = body.notes;
+        if (typeof body.archived === 'boolean') patch.archived = body.archived;
 
         const updated = await updateInAnyYear<Transaction>(
           env.FINANCE_KV,

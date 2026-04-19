@@ -342,18 +342,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ─── Section 2b: All Transactions ────────────────────────── */}
-      <div className="section">
-        <AllTransactionsCard
-          transactions={transactions}
-          userCategories={userCategories}
-          addCustomCategory={addCustomCategory}
-          onUpdateTransaction={handleUpdateTransaction}
-          onDelete={handleDelete}
-          isActiveOwner={isActiveOwner}
-        />
-      </div>
-
       {/* ─── Section 3: Income vs Expenditures ───────────────────── */}
       <div className="section">
         <div className="card">
@@ -511,6 +499,18 @@ export default function Dashboard() {
             </>
           )}
         </div>
+      </div>
+
+      {/* ─── Section 5: All Transactions ─────────────────────────── */}
+      <div className="section">
+        <AllTransactionsCard
+          transactions={transactions}
+          userCategories={userCategories}
+          addCustomCategory={addCustomCategory}
+          onUpdateTransaction={handleUpdateTransaction}
+          onDelete={handleDelete}
+          isActiveOwner={isActiveOwner}
+        />
       </div>
 
       {/* Undo toast — rendered last so it sits on top of everything */}

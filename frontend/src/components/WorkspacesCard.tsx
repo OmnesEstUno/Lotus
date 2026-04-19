@@ -209,77 +209,35 @@ export default function WorkspacesCard() {
           No workspaces yet. Create one above to start tracking your finances.
         </p>
       ) : (
-        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+          gap: 16,
+        }}>
           {instances.map((inst) => {
             const isOwner = inst.owner === currentUser;
             return (
-              <li
-                key={inst.id}
-                style={{ padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>{inst.name}</strong>
-                  <span
-                    style={{
-                      fontSize: '0.8rem',
-                      color: isOwner ? 'var(--accent)' : 'var(--text-muted)',
-                      background: isOwner ? 'var(--accent-dim)' : 'var(--bg-elevated)',
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    {isOwner ? 'Owner' : 'Member'}
-                  </span>
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-                    {isOwner && (
-                      <button
-                        onClick={() => handleRename(inst.id, inst.name)}
-                        className="btn btn-ghost btn-sm"
-                        disabled={busy}
-                      >
-                        Rename
-                      </button>
-                    )}
-                    {isOwner ? (
-                      <button
-                        onClick={() => handleDelete(inst.id, inst.name)}
-                        className="btn btn-sm"
-                        disabled={busy}
-                        style={{
-                          background: 'var(--danger-bg)',
-                          color: 'var(--danger)',
-                          border: '1px solid rgba(248,113,113,0.3)',
-                        }}
-                      >
-                        Delete
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleLeave(inst.id, inst.name)}
-                        className="btn btn-sm"
-                        disabled={busy}
-                        style={{
-                          background: 'var(--danger-bg)',
-                          color: 'var(--danger)',
-                          border: '1px solid rgba(248,113,113,0.3)',
-                        }}
-                      >
-                        Leave workspace
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {isOwner && (
-                  <div style={{ marginTop: 10, paddingLeft: 4 }}>
-                    <p
+              <div key={inst.id} className="workspace-tile">
+                {/* Left: workspace info */}
+                <div className="workspace-tile-body">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong style={{ color: 'var(--text-primary)' }}>{inst.name}</strong>
+                    <span
                       style={{
-                        margin: '0 0 6px',
-                        fontSize: '0.8125rem',
-                        color: 'var(--text-secondary)',
-                        fontWeight: 500,
+                        fontSize: '0.8rem',
+                        color: isOwner ? 'var(--accent)' : 'var(--text-muted)',
+                        background: isOwner ? 'var(--accent-dim)' : 'var(--bg-card)',
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-sm)',
                       }}
                     >
+                      {isOwner ? 'Owner' : 'Member'}
+                    </span>
+                  </div>
+
+                  {/* Members list — shown to everyone, remove action is owner-only */}
+                  <div style={{ marginTop: 8 }}>
+                    <p style={{ margin: '0 0 4px', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                       Members
                     </p>
                     <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px' }}>
@@ -290,24 +248,22 @@ export default function WorkspacesCard() {
                             display: 'flex',
                             alignItems: 'center',
                             gap: 8,
-                            padding: '3px 0',
-                            fontSize: '0.875rem',
+                            padding: '2px 0',
+                            fontSize: '0.8125rem',
                           }}
                         >
-                          <span style={{ color: 'var(--text-primary)' }}>
+                          <span style={{ color: 'var(--text-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {u}
                             {u === inst.owner && (
-                              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
-                                (owner)
-                              </span>
+                              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>(owner)</span>
                             )}
                           </span>
-                          {u !== inst.owner && (
+                          {isOwner && u !== inst.owner && (
                             <button
                               onClick={() => handleRemoveMember(inst.id, u)}
                               className="btn btn-ghost btn-sm"
                               disabled={busy}
-                              style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                              style={{ fontSize: '0.75rem', padding: '2px 8px', flexShrink: 0 }}
                             >
                               Remove
                             </button>
@@ -315,13 +271,44 @@ export default function WorkspacesCard() {
                         </li>
                       ))}
                     </ul>
-                    <WorkspaceInvitesPanel instanceId={inst.id} />
+                    {/* Invite section is owner-only */}
+                    {isOwner && <WorkspaceInvitesPanel instanceId={inst.id} />}
                   </div>
-                )}
-              </li>
+                </div>
+
+                {/* Right: vertically stacked action buttons */}
+                <div className="workspace-tile-actions">
+                  {isOwner && (
+                    <button
+                      onClick={() => handleRename(inst.id, inst.name)}
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy}
+                    >
+                      Rename
+                    </button>
+                  )}
+                  {isOwner ? (
+                    <button
+                      onClick={() => handleDelete(inst.id, inst.name)}
+                      className="btn btn-danger btn-sm"
+                      disabled={busy}
+                    >
+                      Delete
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleLeave(inst.id, inst.name)}
+                      className="btn btn-danger btn-sm"
+                      disabled={busy}
+                    >
+                      Leave
+                    </button>
+                  )}
+                </div>
+              </div>
             );
           })}
-        </ul>
+        </div>
       )}
     </div>
   );

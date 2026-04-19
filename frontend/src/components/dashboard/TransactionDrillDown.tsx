@@ -40,6 +40,7 @@ export interface TransactionDrillDownProps {
   userCategories: UserCategories;
   addCustomCategory: (name: string) => string | null;
   emptyMessage?: string;
+  isActiveOwner?: boolean;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ export default function TransactionDrillDown({
   userCategories,
   addCustomCategory,
   emptyMessage = 'No transactions found.',
+  isActiveOwner = true,
 }: TransactionDrillDownProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -80,6 +82,10 @@ export default function TransactionDrillDown({
 
   async function deleteSelected() {
     if (selectedIds.size === 0) return;
+    if (!isActiveOwner) {
+      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      return;
+    }
     const n = selectedIds.size;
     if (!window.confirm(`Delete ${n} selected entr${n !== 1 ? 'ies' : 'y'}?`)) return;
 
@@ -103,6 +109,10 @@ export default function TransactionDrillDown({
   }
 
   async function handleDeleteOne(e: DrillDownEvent) {
+    if (!isActiveOwner) {
+      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      return;
+    }
     if (!window.confirm(`Delete "${e.description}"?`)) return;
     setBusy(true);
     try {
@@ -176,7 +186,7 @@ export default function TransactionDrillDown({
 
   return (
     <>
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && isActiveOwner && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
           <button
             className="btn btn-sm btn-danger"
@@ -380,18 +390,20 @@ export default function TransactionDrillDown({
                           </svg>
                         </button>
                       )}
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleDeleteOne(e)}
-                        disabled={busy}
-                        title="Delete"
-                        style={{ padding: '4px 8px' }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                      </button>
+                      {isActiveOwner && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleDeleteOne(e)}
+                          disabled={busy}
+                          title="Delete"
+                          style={{ padding: '4px 8px' }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

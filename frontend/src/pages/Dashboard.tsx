@@ -39,7 +39,6 @@ import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
-import DangerZone from '../components/DangerZone';
 // Undo-toast payload: what was just deleted, so we can restore it if the
 // user clicks Undo before the timeout fires.
 interface PendingUndo {
@@ -63,7 +62,7 @@ export default function Dashboard() {
   // Custom categories used by the edit flow
   const { userCategories, addCustomCategory } = useUserCategories();
 
-  const { activeInstanceId } = useWorkspaces();
+  const { activeInstanceId, isActiveOwner } = useWorkspaces();
 
   const refetchAll = useCallback(async () => {
     try {
@@ -316,6 +315,7 @@ export default function Dashboard() {
               onUpdateTransaction={handleUpdateTransaction}
               userCategories={userCategories}
               addCustomCategory={addCustomCategory}
+              isActiveOwner={isActiveOwner}
             />
           )}
         </div>
@@ -360,6 +360,7 @@ export default function Dashboard() {
               onUpdateIncome={handleUpdateIncome}
               userCategories={userCategories}
               addCustomCategory={addCustomCategory}
+              isActiveOwner={isActiveOwner}
             />
           )}
         </div>
@@ -469,16 +470,6 @@ export default function Dashboard() {
             </>
           )}
         </div>
-      </div>
-
-      {/* ─── Danger Zone: purge all data + export backup ─────────── */}
-      <div className="section">
-        <DangerZone
-          transactions={transactions}
-          income={income}
-          userCategories={userCategories}
-          onPurged={refetchAll}
-        />
       </div>
 
       {/* Undo toast — rendered last so it sits on top of everything */}

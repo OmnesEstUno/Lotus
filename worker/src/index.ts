@@ -175,14 +175,14 @@ async function resolveInstance(
   auth: AuthContext,
   env: Env,
   cors: Record<string, string>,
-): Promise<{ instanceId: string } | Response> {
+): Promise<{ instanceId: string; instance: Instance } | Response> {
   const instanceId = request.headers.get('X-Instance-Id');
   if (!instanceId) return respond({ error: 'Missing instance.' }, 400, cors);
   const raw = await env.FINANCE_KV.get(instanceMetaKey(instanceId));
   if (!raw) return respond({ error: 'Instance not found.' }, 404, cors);
-  const inst = JSON.parse(raw) as Instance;
-  if (!inst.members.includes(auth.username)) return respond({ error: 'Forbidden.' }, 403, cors);
-  return { instanceId };
+  const instance = JSON.parse(raw) as Instance;
+  if (!instance.members.includes(auth.username)) return respond({ error: 'Forbidden.' }, 403, cors);
+  return { instanceId, instance };
 }
 
 // ─── Timing-safe dummy hash (lazy, computed once per worker lifetime) ─────────
@@ -763,7 +763,7 @@ export default {
       // ─────────────────────────────────────────────────────────────────────
       const resolved = await resolveInstance(request, auth, env, cors);
       if (resolved instanceof Response) return resolved;
-      const { instanceId } = resolved;
+      const { instanceId, instance } = resolved;
 
       // ── GET transactions ──
       if (path === '/api/transactions' && method === 'GET') {
@@ -817,6 +817,9 @@ export default {
       // ── DELETE transaction ──
       const txnDeleteMatch = path.match(/^\/api\/transactions\/([^/]+)$/);
       if (txnDeleteMatch && method === 'DELETE') {
+        if (instance.owner !== auth.username) {
+          return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
+        }
         const id = txnDeleteMatch[1];
         const ok = await deleteFromAnyYear<Transaction>(
           env.FINANCE_KV,
@@ -943,6 +946,9 @@ export default {
       // ── DELETE income ──
       const incDeleteMatch = path.match(/^\/api\/income\/([^/]+)$/);
       if (incDeleteMatch && method === 'DELETE') {
+        if (instance.owner !== auth.username) {
+          return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
+        }
         const id = incDeleteMatch[1];
         const ok = await deleteFromAnyYear<IncomeEntry>(
           env.FINANCE_KV,
@@ -1012,6 +1018,9 @@ export default {
 
       // ── POST bulk delete (transactions + income in one call) ──
       if (path === '/api/bulk-delete' && method === 'POST') {
+        if (instance.owner !== auth.username) {
+          return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
+        }
         const body = await request.json() as { transactionIds?: string[]; incomeIds?: string[] };
         const txnIds = new Set(Array.isArray(body.transactionIds) ? body.transactionIds : []);
         const incIds = new Set(Array.isArray(body.incomeIds) ? body.incomeIds : []);
@@ -1042,6 +1051,9 @@ export default {
 
       // ── POST purge all data (transactions + income, keeps user categories) ──
       if (path === '/api/purge-all' && method === 'POST') {
+        if (instance.owner !== auth.username) {
+          return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
+        }
         const body = await request.json() as { confirm?: boolean };
         if (body.confirm !== true) {
           return respond({ error: 'Confirmation required.' }, 400, cors);
@@ -1103,6 +1115,9 @@ export default {
 
       // ── POST delete category (reassigns everything to "Other" or the provided target) ──
       if (path === '/api/delete-category' && method === 'POST') {
+        if (instance.owner !== auth.username) {
+          return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
+        }
         const body = await request.json() as { name?: string; reassignTo?: string };
         const name = (body.name ?? '').trim();
         const reassignTo = (body.reassignTo ?? 'Other').trim() || 'Other';

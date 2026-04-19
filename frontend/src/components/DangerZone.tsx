@@ -7,9 +7,10 @@ interface DangerZoneProps {
   income: IncomeEntry[];
   userCategories: UserCategories;
   onPurged: () => Promise<void>;
+  isActiveOwner?: boolean;
 }
 
-export default function DangerZone({ transactions, income, userCategories, onPurged }: DangerZoneProps) {
+export default function DangerZone({ transactions, income, userCategories, onPurged, isActiveOwner = true }: DangerZoneProps) {
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState('');
   const [working, setWorking] = useState(false);
@@ -23,6 +24,10 @@ export default function DangerZone({ transactions, income, userCategories, onPur
   }
 
   async function handlePurge() {
+    if (!isActiveOwner) {
+      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      return;
+    }
     setWorking(true);
     setError('');
     try {
@@ -115,54 +120,56 @@ export default function DangerZone({ transactions, income, userCategories, onPur
         </button>
       </div>
 
-      {/* Purge (destructive) */}
-      <div style={{ borderTop: '1px solid rgba(248,113,113,0.2)', paddingTop: 20 }}>
-        <h3 style={{ color: 'var(--danger)', marginBottom: 8 }}>Purge all data</h3>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-          Permanently delete all transactions and income entries from your account. Your custom
-          categories and description mappings are preserved. <strong>This cannot be undone.</strong>
-        </p>
+      {/* Purge (destructive) — owner only */}
+      {isActiveOwner && (
+        <div style={{ borderTop: '1px solid rgba(248,113,113,0.2)', paddingTop: 20 }}>
+          <h3 style={{ color: 'var(--danger)', marginBottom: 8 }}>Purge all data</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+            Permanently delete all transactions and income entries from your account. Your custom
+            categories and description mappings are preserved. <strong>This cannot be undone.</strong>
+          </p>
 
-        {!confirming ? (
-          <button
-            className="btn btn-danger"
-            onClick={() => { setConfirming(true); setSuccess(''); }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
-            Purge all data
-          </button>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 480 }}>
-            <label className="form-label">
-              Type <strong style={{ color: 'var(--danger)' }}>DELETE</strong> to confirm:
-            </label>
-            <input
-              type="text"
-              className="input"
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              placeholder="DELETE"
-              autoFocus
-              disabled={working}
-            />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                className="btn btn-danger"
-                onClick={handlePurge}
-                disabled={!typedMatches || working}
-              >
-                {working ? <span className="spinner" /> : 'Permanently delete everything'}
-              </button>
-              <button className="btn btn-ghost" onClick={reset} disabled={working}>
-                Cancel
-              </button>
+          {!confirming ? (
+            <button
+              className="btn btn-danger"
+              onClick={() => { setConfirming(true); setSuccess(''); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              Purge all data
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 480 }}>
+              <label className="form-label">
+                Type <strong style={{ color: 'var(--danger)' }}>DELETE</strong> to confirm:
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder="DELETE"
+                autoFocus
+                disabled={working}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-danger"
+                  onClick={handlePurge}
+                  disabled={!typedMatches || working}
+                >
+                  {working ? <span className="spinner" /> : 'Permanently delete everything'}
+                </button>
+                <button className="btn btn-ghost" onClick={reset} disabled={working}>
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

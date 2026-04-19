@@ -214,6 +214,20 @@ function ExpandedMonthView({
                   })}
                 />
               ))}
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+              onClick={() => setSelectedCategories(new Set([...categoryTotals.keys()]))}
+            >
+              Select All
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+              onClick={() => setSelectedCategories(new Set())}
+            >
+              Deselect All
+            </button>
           </div>
         </div>
       )}

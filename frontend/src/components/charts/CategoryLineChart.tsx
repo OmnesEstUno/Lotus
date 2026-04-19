@@ -89,7 +89,6 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
     setActiveCategories((prev) => {
       const next = new Set(prev);
       if (next.has(cat)) {
-        if (next.size === 1) return prev;
         next.delete(cat);
       } else {
         next.add(cat);
@@ -189,6 +188,20 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             </div>
           );
         })}
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+          onClick={() => setActiveCategories(new Set(visibleCategories))}
+        >
+          Select All
+        </button>
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+          onClick={() => setActiveCategories(new Set())}
+        >
+          Deselect All
+        </button>
         {selectedSet.size > 0 && (
           <button
             className="btn btn-ghost btn-sm"
@@ -200,12 +213,18 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
         )}
       </div>
 
-      <p className="text-xs text-muted" style={{ marginBottom: 16 }}>
-        Tip: Click a chip to show/hide a category. Click a data point to isolate it; click more points to compare.
-      </p>
+      {activeCategories.size === 0 ? (
+        <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+          No categories selected. Use the legend to pick some.
+        </div>
+      ) : (
+        <>
+          <p className="text-xs text-muted" style={{ marginBottom: 16 }}>
+            Tip: Click a chip to show/hide a category. Click a data point to isolate it; click more points to compare.
+          </p>
 
-      <ResponsiveContainer width="100%" height={400}>
-        <LineChart
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart
           data={data}
           margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
           onClick={(e: unknown) => {
@@ -275,7 +294,9 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             );
           })}
         </LineChart>
-      </ResponsiveContainer>
+          </ResponsiveContainer>
+        </>
+      )}
     </div>
   );
 }

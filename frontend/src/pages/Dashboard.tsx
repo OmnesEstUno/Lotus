@@ -39,7 +39,6 @@ import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
-import DangerZone from '../components/DangerZone';
 // Undo-toast payload: what was just deleted, so we can restore it if the
 // user clicks Undo before the timeout fires.
 interface PendingUndo {
@@ -469,16 +468,6 @@ export default function Dashboard() {
             </>
           )}
         </div>
-      </div>
-
-      {/* ─── Danger Zone: purge all data + export backup ─────────── */}
-      <div className="section">
-        <DangerZone
-          transactions={transactions}
-          income={income}
-          userCategories={userCategories}
-          onPurged={refetchAll}
-        />
       </div>
 
       {/* Undo toast — rendered last so it sits on top of everything */}

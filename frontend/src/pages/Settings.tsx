@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { getTransactions, renameCategory, deleteCategory } from '../api/client';
-import { Transaction, UserCategories } from '../types';
+import { getTransactions, getIncome, renameCategory, deleteCategory } from '../api/client';
+import { IncomeEntry, Transaction, UserCategories } from '../types';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import InviteTokensCard from '../components/InviteTokensCard';
 import WorkspacesCard from '../components/WorkspacesCard';
 import ArchivedCard from '../components/dashboard/ArchivedCard';
+import DangerZone from '../components/DangerZone';
 import Layout from '../components/layout/Layout';
 
 /**
@@ -17,13 +18,14 @@ export default function Settings() {
   const { userCategories, setUserCategories } = useUserCategories();
   const currentUser = useCurrentUser();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [income, setIncome] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    getTransactions()
-      .then(setTransactions)
+    Promise.all([getTransactions(), getIncome()])
+      .then(([txns, inc]) => { setTransactions(txns); setIncome(inc); })
       .catch((err) => setStatus({ kind: 'error', text: (err as Error).message }))
       .finally(() => setLoading(false));
   }, []);
@@ -38,8 +40,9 @@ export default function Settings() {
 
   async function refreshTransactions() {
     try {
-      const txns = await getTransactions();
+      const [txns, inc] = await Promise.all([getTransactions(), getIncome()]);
       setTransactions(txns);
+      setIncome(inc);
     } catch {
       /* non-fatal */
     }
@@ -311,6 +314,16 @@ export default function Settings() {
 
       {/* ─── Archived Transactions ────────────────────────── */}
       <ArchivedCard />
+
+      {/* ─── Danger Zone ──────────────────────────────────── */}
+      <div style={{ marginTop: 32 }}>
+        <DangerZone
+          transactions={transactions}
+          income={income}
+          userCategories={userCategories}
+          onPurged={refreshTransactions}
+        />
+      </div>
     </Layout>
   );
 }

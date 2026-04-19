@@ -4,12 +4,16 @@ import { IncomeEntry, Transaction } from '../../types';
 // Sentinel value meaning "aggregate across every year of data" — not a real year.
 export const ALL_YEARS = 0;
 
+// Sentinel value for a custom date range option
+export const CUSTOM_RANGE = -2;
+
 interface YearSelectorProps {
   transactions: Transaction[];
   incomeEntries?: IncomeEntry[];
   value: number;
   onChange: (year: number) => void;
   allowAllTime?: boolean;
+  customOption?: boolean;
 }
 
 // Renders a <select> of years derived from the data, descending. Pulls
@@ -17,7 +21,7 @@ interface YearSelectorProps {
 // Always includes the current year even if there's no data for it.
 // When allowAllTime is set, an "All Time" option (value ALL_YEARS) is
 // appended to the bottom of the list.
-export default function YearSelector({ transactions, incomeEntries, value, onChange, allowAllTime }: YearSelectorProps) {
+export default function YearSelector({ transactions, incomeEntries, value, onChange, allowAllTime, customOption }: YearSelectorProps) {
   const currentYear = new Date().getFullYear();
   const fromData = new Set<number>();
   for (const t of transactions) {
@@ -42,6 +46,7 @@ export default function YearSelector({ transactions, incomeEntries, value, onCha
         <option key={y} value={y}>{y}</option>
       ))}
       {allowAllTime && <option value={ALL_YEARS}>All Time</option>}
+      {customOption && <option value={CUSTOM_RANGE}>Custom…</option>}
     </select>
   );
 }

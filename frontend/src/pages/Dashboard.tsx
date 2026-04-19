@@ -48,8 +48,9 @@ import {
   MONTH_NAMES,
 } from '../utils/dataProcessing';
 import { getCategoryColor } from '../utils/categories';
-import CategoryLineChart, { TIME_RANGE_LABELS } from '../components/charts/CategoryLineChart';
+import CategoryLineChart from '../components/charts/CategoryLineChart';
 import ExpenseCategoryTable from '../components/dashboard/ExpenseCategoryTable';
+import TimeRangeSelector from '../components/dashboard/TimeRangeSelector';
 import YearSelector from '../components/dashboard/YearSelector';
 import AllTransactionsCard from '../components/dashboard/AllTransactionsCard';
 import MonthlyBalanceView from '../components/dashboard/MonthlyBalanceView';
@@ -406,19 +407,7 @@ export default function Dashboard() {
             title="Spending Trends"
             minimized={isMin}
             onToggleMinimize={toggle}
-            headerActions={
-              <div className="tabs">
-                {(Object.keys(TIME_RANGE_LABELS) as TimeRange[]).map((r) => (
-                  <button
-                    key={r}
-                    className={`tab ${timeRange === r ? 'active' : ''}`}
-                    onClick={() => setTimeRange(r)}
-                  >
-                    {TIME_RANGE_LABELS[r]}
-                  </button>
-                ))}
-              </div>
-            }
+            headerActions={<TimeRangeSelector value={timeRange} onChange={setTimeRange} />}
           >
             {transactions.length === 0 ? (
               <EmptyState message="No transactions yet. Upload a CSV or add entries manually." />

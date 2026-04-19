@@ -178,8 +178,14 @@ export async function setActiveInstance(instanceId: string): Promise<void> {
 
 // ─── Transactions ────────────────────────────────────────────────────────────
 
-export async function getTransactions(): Promise<Transaction[]> {
-  return request('/api/transactions');
+/**
+ * Fetch all transactions. Pass `year` to scope the request to a single
+ * calendar year (Task 9's YearSelector can opt into this for large datasets).
+ */
+export async function getTransactions(year?: number): Promise<Transaction[]> {
+  const qs = year ? `?year=${year}` : '';
+  const r = await request<{ transactions: Transaction[] }>(`/api/transactions${qs}`);
+  return r.transactions;
 }
 
 /** Payload for addTransactions — each row may carry `allowDuplicate` to
@@ -207,8 +213,14 @@ export async function updateTransaction(id: string, updates: TransactionUpdate):
 
 // ─── Income ──────────────────────────────────────────────────────────────────
 
-export async function getIncome(): Promise<IncomeEntry[]> {
-  return request('/api/income');
+/**
+ * Fetch all income entries. Pass `year` to scope the request to a single
+ * calendar year (Task 9's YearSelector can opt into this for large datasets).
+ */
+export async function getIncome(year?: number): Promise<IncomeEntry[]> {
+  const qs = year ? `?year=${year}` : '';
+  const r = await request<{ income: IncomeEntry[] }>(`/api/income${qs}`);
+  return r.income;
 }
 
 export type AddIncomeInput = Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean };

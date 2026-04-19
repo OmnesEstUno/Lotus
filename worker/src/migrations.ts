@@ -1,4 +1,5 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
+import { writeAllYears, yearOfISODate } from './paginated';
 
 const profileKey = (username: string) => `users:${username}:profile`;
 const userDataKey = (username: string, leaf: string) => `users:${username}:${leaf}`;
@@ -25,6 +26,24 @@ export async function createDefaultInstance(kv: KVNamespace, username: string): 
   };
   await kv.put(instanceMetaKey(id), JSON.stringify(instance));
   return instance;
+}
+
+export async function migrateToYearPartitioned(
+  kv: KVNamespace,
+  instanceId: string,
+): Promise<void> {
+  const txRaw = await kv.get(`instances:${instanceId}:data:transactions`);
+  if (txRaw) {
+    const txs = JSON.parse(txRaw) as { date: string }[];
+    await writeAllYears(kv, `instances:${instanceId}:data:transactions`, txs as unknown as { id: string; date: string }[], (t) => yearOfISODate((t as { date: string }).date));
+    await kv.delete(`instances:${instanceId}:data:transactions`);
+  }
+  const incRaw = await kv.get(`instances:${instanceId}:data:income`);
+  if (incRaw) {
+    const inc = JSON.parse(incRaw) as { date: string }[];
+    await writeAllYears(kv, `instances:${instanceId}:data:income`, inc as unknown as { id: string; date: string }[], (i) => yearOfISODate((i as { date: string }).date));
+    await kv.delete(`instances:${instanceId}:data:income`);
+  }
 }
 
 export async function migrateSingleUserToMultiTenant(
@@ -78,6 +97,10 @@ export async function migrateSingleUserToMultiTenant(
     ...legacyDataKeys.map((k) => kv.delete(k)),
   ]);
 
+  // Migrate the default instance's monolithic data keys to year-partitioned shards.
+  // Freshly migrated users (single-user → Task 2 → Task 3 → Task 3.5) land directly
+  // on the paginated layout without needing the admin migrate-years endpoint.
+  await migrateToYearPartitioned(kv, instanceId);
+
   return { moved, instanceId };
 }
-

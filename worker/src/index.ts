@@ -17,7 +17,7 @@ import {
   generateTOTPSecret,
   verifyTOTP,
 } from './crypto';
-import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey } from './migrations';
+import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './migrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites';
 import {
   createWorkspaceInvite,
@@ -26,6 +26,15 @@ import {
   listWorkspaceInvites,
   deleteWorkspaceInvite,
 } from './workspace-invites';
+import {
+  readAllYears,
+  readYears,
+  writeAllYears,
+  upsertInYear,
+  updateInAnyYear,
+  deleteFromAnyYear,
+  yearOfISODate,
+} from './paginated';
 
 export interface Env {
   FINANCE_KV: KVNamespace;
@@ -190,25 +199,36 @@ type TaxBreakdown = { federal: number; state: number; socialSecurity: number; me
 type IncomeEntry = { id: string; date: string; description: string; grossAmount: number; netAmount: number; taxes: TaxBreakdown; source: string };
 
 async function getTransactions(kv: KVNamespace, instanceId: string): Promise<Transaction[]> {
-  const raw = await kv.get(instanceKey(instanceId, 'data:transactions'));
-  return raw ? (JSON.parse(raw) as Transaction[]) : [];
+  return readAllYears<Transaction>(kv, instanceKey(instanceId, 'data:transactions'));
 }
 
 async function saveTransactions(kv: KVNamespace, instanceId: string, txns: Transaction[]): Promise<void> {
-  await kv.put(instanceKey(instanceId, 'data:transactions'), JSON.stringify(txns));
+  return writeAllYears<Transaction>(kv, instanceKey(instanceId, 'data:transactions'), txns, (t) => yearOfISODate(t.date));
 }
 
 async function getIncomeEntries(kv: KVNamespace, instanceId: string): Promise<IncomeEntry[]> {
-  const raw = await kv.get(instanceKey(instanceId, 'data:income'));
-  return raw ? (JSON.parse(raw) as IncomeEntry[]) : [];
+  return readAllYears<IncomeEntry>(kv, instanceKey(instanceId, 'data:income'));
 }
 
 async function saveIncomeEntries(kv: KVNamespace, instanceId: string, entries: IncomeEntry[]): Promise<void> {
-  await kv.put(instanceKey(instanceId, 'data:income'), JSON.stringify(entries));
+  return writeAllYears<IncomeEntry>(kv, instanceKey(instanceId, 'data:income'), entries, (i) => yearOfISODate(i.date));
 }
 
 function generateId(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * Deletes all year shards and the index key for a paginated data prefix.
+ * Used by DELETE /api/instances/:id to cascade-delete year-partitioned data.
+ */
+async function deletePaginatedSlice(kv: KVNamespace, prefix: string): Promise<void> {
+  const indexRaw = await kv.get(`${prefix}:index`);
+  if (indexRaw) {
+    const { years } = JSON.parse(indexRaw) as { years: number[] };
+    await Promise.all(years.map((y) => kv.delete(`${prefix}:${y}`)));
+    await kv.delete(`${prefix}:index`);
+  }
 }
 
 /**
@@ -313,6 +333,27 @@ export default {
           await deleteInvite(env.FINANCE_KV, m[1]);
           return respond({ ok: true }, 200, cors);
         }
+      }
+
+      // ── Admin: one-time year-partition migration ──
+      if (path === '/api/admin/migrate-years' && method === 'POST') {
+        const auth = await authenticateAdmin(request, env, cors);
+        if (auth instanceof Response) return auth;
+        if ((await env.FINANCE_KV.get('meta:yearPartitioned')) === 'true') {
+          return respond({ error: 'Already year-partitioned.' }, 400, cors);
+        }
+        const usernames = await getUsernames(env.FINANCE_KV);
+        let migrated = 0;
+        for (const u of usernames) {
+          const profile = await getUserProfile(env.FINANCE_KV, u);
+          if (!profile) continue;
+          for (const id of profile.instanceIds ?? []) {
+            await migrateToYearPartitioned(env.FINANCE_KV, id);
+            migrated++;
+          }
+        }
+        await env.FINANCE_KV.put('meta:yearPartitioned', 'true');
+        return respond({ ok: true, migrated }, 200, cors);
       }
 
       // ── Setup Status ──
@@ -577,10 +618,9 @@ export default {
           const inst = JSON.parse(raw) as Instance;
           if (inst.owner !== username) return respond({ error: 'Only the owner can delete.' }, 403, cors);
           await Promise.all([
-            // TODO(Task-3.5): also delete year-sharded data keys once year pagination lands.
             env.FINANCE_KV.delete(instanceMetaKey(id)),
-            env.FINANCE_KV.delete(instanceKey(id, 'data:transactions')),
-            env.FINANCE_KV.delete(instanceKey(id, 'data:income')),
+            deletePaginatedSlice(env.FINANCE_KV, instanceKey(id, 'data:transactions')),
+            deletePaginatedSlice(env.FINANCE_KV, instanceKey(id, 'data:income')),
             env.FINANCE_KV.delete(instanceKey(id, 'data:userCategories')),
           ]);
           // Remove from every member's profile
@@ -716,8 +756,12 @@ export default {
 
       // ── GET transactions ──
       if (path === '/api/transactions' && method === 'GET') {
-        const txns = await getTransactions(env.FINANCE_KV, instanceId);
-        return respond(txns, 200, cors);
+        const yearParam = url.searchParams.get('year');
+        const prefix = instanceKey(instanceId, 'data:transactions');
+        const txns = yearParam
+          ? await readYears<Transaction>(env.FINANCE_KV, prefix, [Number(yearParam)])
+          : await readAllYears<Transaction>(env.FINANCE_KV, prefix);
+        return respond({ transactions: txns }, 200, cors);
       }
 
       // ── POST transactions (batch) ──
@@ -752,8 +796,9 @@ export default {
           added.push({ ...t, id: generateId() });
         }
 
-        if (added.length > 0) {
-          await saveTransactions(env.FINANCE_KV, instanceId, [...existing, ...added]);
+        const txPrefix = instanceKey(instanceId, 'data:transactions');
+        for (const tx of added) {
+          await upsertInYear<Transaction>(env.FINANCE_KV, txPrefix, tx);
         }
         return respond({ added: added.length, skipped }, 200, cors);
       }
@@ -762,10 +807,12 @@ export default {
       const txnDeleteMatch = path.match(/^\/api\/transactions\/([^/]+)$/);
       if (txnDeleteMatch && method === 'DELETE') {
         const id = txnDeleteMatch[1];
-        const txns = await getTransactions(env.FINANCE_KV, instanceId);
-        const next = txns.filter((t) => t.id !== id);
-        if (next.length === txns.length) return respond({ error: 'Transaction not found.' }, 404, cors);
-        await saveTransactions(env.FINANCE_KV, instanceId, next);
+        const ok = await deleteFromAnyYear<Transaction>(
+          env.FINANCE_KV,
+          instanceKey(instanceId, 'data:transactions'),
+          id,
+        );
+        if (!ok) return respond({ error: 'Transaction not found.' }, 404, cors);
         return respond({ ok: true }, 200, cors);
       }
 
@@ -779,28 +826,31 @@ export default {
           category?: string;
           amount?: number;
         };
-        const txns = await getTransactions(env.FINANCE_KV, instanceId);
-        const idx = txns.findIndex((t) => t.id === id);
-        if (idx < 0) return respond({ error: 'Transaction not found.' }, 404, cors);
+        // Build only the fields explicitly provided so updateInAnyYear merges correctly.
+        const patch: Partial<Transaction> = {};
+        if (typeof body.date === 'string' && body.date) patch.date = body.date;
+        if (typeof body.description === 'string') patch.description = body.description;
+        if (typeof body.category === 'string' && body.category) patch.category = body.category;
+        if (typeof body.amount === 'number' && !isNaN(body.amount)) patch.amount = body.amount;
 
-        const existing = txns[idx];
-        const updated: Transaction = {
-          ...existing,
-          date: typeof body.date === 'string' && body.date ? body.date : existing.date,
-          description: typeof body.description === 'string' ? body.description : existing.description,
-          category: typeof body.category === 'string' && body.category ? body.category : existing.category,
-          amount: typeof body.amount === 'number' && !isNaN(body.amount) ? body.amount : existing.amount,
-        };
-        const next = [...txns];
-        next[idx] = updated;
-        await saveTransactions(env.FINANCE_KV, instanceId, next);
+        const updated = await updateInAnyYear<Transaction>(
+          env.FINANCE_KV,
+          instanceKey(instanceId, 'data:transactions'),
+          id,
+          patch,
+        );
+        if (!updated) return respond({ error: 'Transaction not found.' }, 404, cors);
         return respond(updated, 200, cors);
       }
 
       // ── GET income ──
       if (path === '/api/income' && method === 'GET') {
-        const entries = await getIncomeEntries(env.FINANCE_KV, instanceId);
-        return respond(entries, 200, cors);
+        const yearParam = url.searchParams.get('year');
+        const prefix = instanceKey(instanceId, 'data:income');
+        const entries = yearParam
+          ? await readYears<IncomeEntry>(env.FINANCE_KV, prefix, [Number(yearParam)])
+          : await readAllYears<IncomeEntry>(env.FINANCE_KV, prefix);
+        return respond({ income: entries }, 200, cors);
       }
 
       // ── POST income ──
@@ -824,7 +874,7 @@ export default {
         }
 
         const entry: IncomeEntry = { ...rawEntry, id: generateId() };
-        await saveIncomeEntries(env.FINANCE_KV, instanceId, [...existing, entry]);
+        await upsertInYear<IncomeEntry>(env.FINANCE_KV, instanceKey(instanceId, 'data:income'), entry);
 
         // Auto-create tax transactions from income entry. These also go
         // through the transaction dedup logic so we don't double-insert if
@@ -865,8 +915,9 @@ export default {
             }
           }
 
-          if (taxEntries.length > 0) {
-            await saveTransactions(env.FINANCE_KV, instanceId, [...taxTxns, ...taxEntries]);
+          const txPrefix = instanceKey(instanceId, 'data:transactions');
+          for (const tx of taxEntries) {
+            await upsertInYear<Transaction>(env.FINANCE_KV, txPrefix, tx);
           }
         }
 
@@ -877,10 +928,12 @@ export default {
       const incDeleteMatch = path.match(/^\/api\/income\/([^/]+)$/);
       if (incDeleteMatch && method === 'DELETE') {
         const id = incDeleteMatch[1];
-        const entries = await getIncomeEntries(env.FINANCE_KV, instanceId);
-        const next = entries.filter((e) => e.id !== id);
-        if (next.length === entries.length) return respond({ error: 'Income entry not found.' }, 404, cors);
-        await saveIncomeEntries(env.FINANCE_KV, instanceId, next);
+        const ok = await deleteFromAnyYear<IncomeEntry>(
+          env.FINANCE_KV,
+          instanceKey(instanceId, 'data:income'),
+          id,
+        );
+        if (!ok) return respond({ error: 'Income entry not found.' }, 404, cors);
         return respond({ ok: true }, 200, cors);
       }
 
@@ -894,21 +947,20 @@ export default {
           grossAmount?: number;
           netAmount?: number;
         };
-        const entries = await getIncomeEntries(env.FINANCE_KV, instanceId);
-        const idx = entries.findIndex((e) => e.id === id);
-        if (idx < 0) return respond({ error: 'Income entry not found.' }, 404, cors);
+        // Build only the fields explicitly provided so updateInAnyYear merges correctly.
+        const patch: Partial<IncomeEntry> = {};
+        if (typeof body.date === 'string' && body.date) patch.date = body.date;
+        if (typeof body.description === 'string') patch.description = body.description;
+        if (typeof body.grossAmount === 'number' && !isNaN(body.grossAmount)) patch.grossAmount = body.grossAmount;
+        if (typeof body.netAmount === 'number' && !isNaN(body.netAmount)) patch.netAmount = body.netAmount;
 
-        const existing = entries[idx];
-        const updated: IncomeEntry = {
-          ...existing,
-          date: typeof body.date === 'string' && body.date ? body.date : existing.date,
-          description: typeof body.description === 'string' ? body.description : existing.description,
-          grossAmount: typeof body.grossAmount === 'number' && !isNaN(body.grossAmount) ? body.grossAmount : existing.grossAmount,
-          netAmount: typeof body.netAmount === 'number' && !isNaN(body.netAmount) ? body.netAmount : existing.netAmount,
-        };
-        const next = [...entries];
-        next[idx] = updated;
-        await saveIncomeEntries(env.FINANCE_KV, instanceId, next);
+        const updated = await updateInAnyYear<IncomeEntry>(
+          env.FINANCE_KV,
+          instanceKey(instanceId, 'data:income'),
+          id,
+          patch,
+        );
+        if (!updated) return respond({ error: 'Income entry not found.' }, 404, cors);
         return respond(updated, 200, cors);
       }
 
@@ -978,8 +1030,10 @@ export default {
         if (body.confirm !== true) {
           return respond({ error: 'Confirmation required.' }, 400, cors);
         }
-        await env.FINANCE_KV.delete(instanceKey(instanceId, 'data:transactions'));
-        await env.FINANCE_KV.delete(instanceKey(instanceId, 'data:income'));
+        await Promise.all([
+          deletePaginatedSlice(env.FINANCE_KV, instanceKey(instanceId, 'data:transactions')),
+          deletePaginatedSlice(env.FINANCE_KV, instanceKey(instanceId, 'data:income')),
+        ]);
         return respond({ ok: true }, 200, cors);
       }
 

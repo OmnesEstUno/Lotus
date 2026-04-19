@@ -32,7 +32,7 @@ import {
 import { getCategoryColor } from '../utils/categories';
 import CategoryLineChart, { TIME_RANGE_LABELS } from '../components/charts/CategoryLineChart';
 import ExpenseCategoryTable from '../components/dashboard/ExpenseCategoryTable';
-import YearSelector, { ALL_YEARS } from '../components/dashboard/YearSelector';
+import YearSelector from '../components/dashboard/YearSelector';
 import AllTransactionsCard from '../components/dashboard/AllTransactionsCard';
 import MonthlyBalanceView from '../components/dashboard/MonthlyBalanceView';
 import ExpandedMonthView from '../components/dashboard/ExpandedMonthView';
@@ -244,9 +244,8 @@ export default function Dashboard() {
   const categoryAverages = buildCategoryAverages(transactions);
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
-  // For past years or All Time show the full calendar; for the current year truncate at the current month.
-  const expenseMonthCount =
-    expenseYear === ALL_YEARS || expenseYear < currentYear ? 12 : currentMonth + 1;
+  // For past years show the full calendar; for the current year truncate at the current month.
+  const expenseMonthCount = expenseYear < currentYear ? 12 : currentMonth + 1;
 
   return (
     <Layout>
@@ -313,7 +312,7 @@ export default function Dashboard() {
           <div className="card-header">
             <h2>Expenses by Category</h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <YearSelector transactions={transactions} value={expenseYear} onChange={setExpenseYear} allowAllTime />
+              <YearSelector transactions={transactions} value={expenseYear} onChange={setExpenseYear} />
               {expandedCategory && (
                 <button className="btn btn-ghost btn-sm" onClick={() => setExpandedCategory(null)}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -325,7 +324,7 @@ export default function Dashboard() {
             </div>
           </div>
           {monthlyTable.length === 0 ? (
-            <EmptyState message={expenseYear === ALL_YEARS ? 'No expense data yet.' : `No expense data for ${expenseYear}.`} />
+            <EmptyState message={`No expense data for ${expenseYear}.`} />
           ) : (
             <ExpenseCategoryTable
               monthlyTable={monthlyTable}

@@ -60,6 +60,28 @@ export default function TransactionDrillDown({
   const [busy, setBusy] = useState(false);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
+  type SortKey = 'date' | 'description' | 'category' | 'amount';
+  type SortDir = 'asc' | 'desc';
+  const [sortKey, setSortKey] = useState<SortKey>('date');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir(key === 'date' ? 'desc' : 'asc'); }
+  }
+
+  const sortedEvents = [...events].sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    switch (sortKey) {
+      case 'date': return (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) * dir;
+      case 'description':
+        return a.description.localeCompare(b.description) * dir;
+      case 'category':
+        return (a.category ?? '').localeCompare(b.category ?? '') * dir;
+      case 'amount': return (a.amount - b.amount) * dir;
+    }
+  });
+
   // Composite key: "expense:<id>" or "income:<id>" to avoid collisions
   const eventKey = (e: DrillDownEvent) => `${e.kind}:${e.id}`;
 
@@ -75,8 +97,8 @@ export default function TransactionDrillDown({
 
   function toggleAll() {
     setSelectedIds((prev) => {
-      if (prev.size === events.length) return new Set();
-      return new Set(events.map(eventKey));
+      if (prev.size === sortedEvents.length) return new Set();
+      return new Set(sortedEvents.map(eventKey));
     });
   }
 
@@ -205,26 +227,34 @@ export default function TransactionDrillDown({
               <th style={{ width: 32 }}>
                 <input
                   type="checkbox"
-                  checked={selectedIds.size === events.length && events.length > 0}
+                  checked={selectedIds.size === sortedEvents.length && sortedEvents.length > 0}
                   ref={(el) => {
                     if (el) {
-                      el.indeterminate = selectedIds.size > 0 && selectedIds.size < events.length;
+                      el.indeterminate = selectedIds.size > 0 && selectedIds.size < sortedEvents.length;
                     }
                   }}
                   onChange={toggleAll}
                   title="Select all / none"
                 />
               </th>
-              <th>Date</th>
-              <th>Description</th>
+              <th onClick={() => toggleSort('date')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Date{sortKey === 'date' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+              <th onClick={() => toggleSort('description')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Description{sortKey === 'description' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
               <th style={{ width: 180 }}>Notes</th>
-              <th>Category</th>
-              <th className="num">Amount</th>
+              <th onClick={() => toggleSort('category')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Category{sortKey === 'category' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+              <th className="num" onClick={() => toggleSort('amount')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Amount{sortKey === 'amount' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
               <th style={{ width: 80 }}></th>
             </tr>
           </thead>
           <tbody>
-            {events.map((e) => {
+            {sortedEvents.map((e) => {
               const k = eventKey(e);
               const isSelected = selectedIds.has(k);
               const isEditing = editDraft?.id === e.id && editDraft?.kind === e.kind;

@@ -211,6 +211,17 @@ export async function updateTransaction(id: string, updates: TransactionUpdate):
   });
 }
 
+export async function bulkUpdateCategory(
+  pattern: string,
+  newCategory: string,
+  previousCategory?: string,
+): Promise<{ updated: number }> {
+  return request('/api/transactions/bulk-update-category', {
+    method: 'POST',
+    body: JSON.stringify({ pattern, newCategory, previousCategory }),
+  });
+}
+
 // ─── Income ──────────────────────────────────────────────────────────────────
 
 /**

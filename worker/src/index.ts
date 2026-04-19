@@ -1065,6 +1065,30 @@ export default {
         return respond({ ok: true }, 200, cors);
       }
 
+      // ── POST bulk update category for transactions matching a description pattern ──
+      if (path === '/api/transactions/bulk-update-category' && method === 'POST') {
+        const body = await request.json() as { newCategory?: string; pattern?: string; previousCategory?: string };
+        const newCategory = (body.newCategory ?? '').trim();
+        const pattern = (body.pattern ?? '').trim();
+        if (!newCategory || !pattern) return respond({ error: 'newCategory and pattern are required.' }, 400, cors);
+        const txns = await getTransactions(env.FINANCE_KV, instanceId);
+        const patternLower = pattern.toLowerCase();
+        let updated = 0;
+        const next = txns.map((t) => {
+          if (t.type !== 'expense') return t;
+          if (t.archived) return t;
+          // Only retarget rows that were in the previous category (if specified) so an
+          // accidental broad pattern doesn't overwrite intentionally-different categorizations.
+          if (body.previousCategory && t.category !== body.previousCategory) return t;
+          if (!t.description.toLowerCase().includes(patternLower)) return t;
+          if (t.category === newCategory) return t;
+          updated++;
+          return { ...t, category: newCategory };
+        });
+        if (updated > 0) await saveTransactions(env.FINANCE_KV, instanceId, next);
+        return respond({ updated }, 200, cors);
+      }
+
       // ── POST rename category (cascades through transactions, mappings, custom list) ──
       if (path === '/api/rename-category' && method === 'POST') {
         const body = await request.json() as { from?: string; to?: string };

@@ -14,6 +14,7 @@ import {
   getTransactions,
   getIncome,
   bulkDelete,
+  bulkUpdateCategory,
   addTransactions,
   addIncome,
   updateTransaction,
@@ -21,6 +22,7 @@ import {
   AddTransactionInput,
   AddIncomeInput,
 } from '../api/client';
+import { derivePattern } from '../utils/categories';
 import {
   buildMonthlyExpenseTable,
   buildMonthlyBalance,
@@ -173,14 +175,43 @@ export default function Dashboard() {
    */
   const handleUpdateTransaction = useCallback(
     async (id: string, updates: Parameters<typeof updateTransaction>[1]) => {
+      const prev = transactions.find((t) => t.id === id);
       try {
         await updateTransaction(id, updates);
+        // If the category changed, offer to apply it to other transactions with a
+        // matching derived description pattern. Skips built-in income rows and
+        // anything already in the new category.
+        if (
+          prev &&
+          updates.category &&
+          updates.category !== prev.category &&
+          prev.type === 'expense'
+        ) {
+          const pattern = derivePattern(prev.description);
+          const patternLower = pattern.toLowerCase();
+          const matches = transactions.filter(
+            (t) =>
+              t.id !== id &&
+              !t.archived &&
+              t.type === 'expense' &&
+              t.category === prev.category &&
+              t.description.toLowerCase().includes(patternLower),
+          );
+          if (
+            matches.length > 0 &&
+            window.confirm(
+              `Apply "${updates.category}" to ${matches.length} other transaction${matches.length !== 1 ? 's' : ''} matching "${pattern}"?`,
+            )
+          ) {
+            await bulkUpdateCategory(pattern, updates.category, prev.category);
+          }
+        }
         await refetchAll();
       } catch (err) {
         window.alert(`Update failed: ${(err as Error).message}`);
       }
     },
-    [refetchAll],
+    [transactions, refetchAll],
   );
 
   const handleUpdateIncome = useCallback(

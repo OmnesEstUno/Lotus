@@ -4,6 +4,7 @@ import { Transaction, UserCategories } from '../../types';
 import { TransactionUpdate } from '../../api/client';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 import YearSelector, { ALL_YEARS } from './YearSelector';
+import DashboardCard from './DashboardCard';
 
 interface AllTransactionsCardProps {
   transactions: Transaction[];
@@ -12,6 +13,9 @@ interface AllTransactionsCardProps {
   onUpdateTransaction: (id: string, updates: TransactionUpdate) => Promise<void>;
   onDelete: (txnIds: string[], incIds: string[], label: string) => Promise<void>;
   isActiveOwner?: boolean;
+  cardId: string;
+  minimized: boolean;
+  onToggleMinimize: () => void;
 }
 
 export default function AllTransactionsCard({
@@ -21,6 +25,9 @@ export default function AllTransactionsCard({
   onUpdateTransaction,
   onDelete,
   isActiveOwner = true,
+  cardId,
+  minimized,
+  onToggleMinimize,
 }: AllTransactionsCardProps) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,11 +60,15 @@ export default function AllTransactionsCard({
   }
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <h2>All Transactions</h2>
+    <DashboardCard
+      id={cardId}
+      title="All Transactions"
+      minimized={minimized}
+      onToggleMinimize={onToggleMinimize}
+      headerActions={
         <YearSelector transactions={transactions} value={year} onChange={setYear} allowAllTime />
-      </div>
+      }
+    >
       <input
         type="text"
         className="input"
@@ -80,6 +91,6 @@ export default function AllTransactionsCard({
         }
         isActiveOwner={isActiveOwner}
       />
-    </div>
+    </DashboardCard>
   );
 }

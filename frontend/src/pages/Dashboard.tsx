@@ -26,6 +26,7 @@ import {
   buildMonthlyBalance,
   buildCategoryAverages,
   formatCurrency,
+  getTrackedDuration,
   MONTH_NAMES,
 } from '../utils/dataProcessing';
 import { getCategoryColor } from '../utils/categories';
@@ -258,8 +259,18 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Transactions Tracked</div>
-          <div className="stat-value">{transactions.length.toLocaleString()}</div>
+          <div className="stat-label">Transactions Tracked Over:</div>
+          <div className="stat-value" style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+            <span>{transactions.length.toLocaleString()}</span>
+            {transactions.length > 0 && (() => {
+              const duration = getTrackedDuration(transactions);
+              return (
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  {duration.years}YR, {duration.months}MO
+                </span>
+              );
+            })()}
+          </div>
         </div>
       </div>
 

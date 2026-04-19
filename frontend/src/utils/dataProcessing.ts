@@ -319,6 +319,19 @@ export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
+// Span from the earliest to latest transaction date, as years + excess months.
+// Archived transactions are excluded — they shouldn't extend the tracked range.
+export function getTrackedDuration(transactions: Transaction[]): { years: number; months: number } {
+  const active = transactions.filter((t) => !t.archived);
+  if (active.length === 0) return { years: 0, months: 0 };
+  const times = active.map((t) => parseISO(t.date).getTime());
+  const minDate = new Date(Math.min(...times));
+  const maxDate = new Date(Math.max(...times));
+  const totalMonths = (maxDate.getFullYear() - minDate.getFullYear()) * 12
+                    + (maxDate.getMonth() - minDate.getMonth());
+  return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
+}
+
 export function getMaxValue(data: LineChartPoint[], activeCategories: Set<Category>): number {
   let max = 0;
   for (const point of data) {

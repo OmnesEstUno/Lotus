@@ -9,6 +9,22 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
+import {
+  DndContext,
+  DragEndEvent,
+  MouseSensor,
+  TouchSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { Transaction, IncomeEntry, TimeRange, Category, CustomDateRange } from '../types';
 import {
   getTransactions,
@@ -39,18 +55,44 @@ import AllTransactionsCard from '../components/dashboard/AllTransactionsCard';
 import MonthlyBalanceView from '../components/dashboard/MonthlyBalanceView';
 import NetBalanceView from '../components/dashboard/NetBalanceView';
 import ExpandedMonthView from '../components/dashboard/ExpandedMonthView';
+import DashboardCard from '../components/dashboard/DashboardCard';
 import Toast from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
+
 // Undo-toast payload: what was just deleted, so we can restore it if the
 // user clicks Undo before the timeout fires.
 interface PendingUndo {
   transactions: Transaction[];
   income: IncomeEntry[];
   label: string;
+}
+
+// Stable identifiers for each draggable card. Order here is the default
+// layout when no per-instance preference exists in localStorage.
+const CARD_IDS = [
+  'spending-trends',
+  'expenses-by-category',
+  'income-vs-expenditures',
+  'avg-expenditures',
+  'all-transactions',
+] as const;
+type CardId = (typeof CARD_IDS)[number];
+
+const orderKey = (instanceId: string) => `dashboard:cardOrder:${instanceId}`;
+const minKey = (instanceId: string) => `dashboard:minimized:${instanceId}`;
+
+// Merge a persisted order with the canonical CARD_IDS: drop unknown ids and
+// append any new ids that didn't exist when the preference was saved. This
+// keeps older localStorage values forward-compatible when we add cards.
+function reconcileOrder(saved: string[] | null): CardId[] {
+  if (!saved) return [...CARD_IDS];
+  const valid = saved.filter((id): id is CardId => (CARD_IDS as readonly string[]).includes(id));
+  const missing = CARD_IDS.filter((id) => !valid.includes(id));
+  return [...valid, ...missing];
 }
 
 export default function Dashboard() {
@@ -65,6 +107,11 @@ export default function Dashboard() {
   const [expenseYear, setExpenseYear] = useState(new Date().getFullYear());
   const [incomeYear, setIncomeYear] = useState(new Date().getFullYear());
 
+  // Card layout state: order + which cards are minimized. Persisted per
+  // active workspace so each instance remembers its own layout.
+  const [cardOrder, setCardOrder] = useState<CardId[]>([...CARD_IDS]);
+  const [minimizedCards, setMinimizedCards] = useState<Set<CardId>>(new Set());
+
   // Undo toast — populated right after a successful delete
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
 
@@ -72,6 +119,19 @@ export default function Dashboard() {
   const { userCategories, addCustomCategory } = useUserCategories();
 
   const { activeInstanceId, isActiveOwner } = useWorkspaces();
+
+  // Drag sensors. MouseSensor fires immediately on desktop; TouchSensor
+  // requires a 200ms long-press so mobile scrolls aren't hijacked. Keyboard
+  // sensor gives full a11y (tab → space → arrow keys → space).
+  const sensors = useSensors(
+    useSensor(MouseSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
   const refetchAll = useCallback(async () => {
     try {
@@ -106,6 +166,57 @@ export default function Dashboard() {
     setLoading(true);
     refetchAll().finally(() => setLoading(false));
   }, [activeInstanceId, refetchAll]);
+
+  // Load saved card order + minimized state when the active workspace changes.
+  useEffect(() => {
+    if (!activeInstanceId) return;
+    try {
+      const orderRaw = localStorage.getItem(orderKey(activeInstanceId));
+      const parsedOrder = orderRaw ? (JSON.parse(orderRaw) as string[]) : null;
+      setCardOrder(reconcileOrder(parsedOrder));
+    } catch {
+      setCardOrder([...CARD_IDS]);
+    }
+    try {
+      const minRaw = localStorage.getItem(minKey(activeInstanceId));
+      const parsedMin = minRaw ? (JSON.parse(minRaw) as string[]) : [];
+      const valid = parsedMin.filter((id): id is CardId => (CARD_IDS as readonly string[]).includes(id));
+      setMinimizedCards(new Set(valid));
+    } catch {
+      setMinimizedCards(new Set());
+    }
+  }, [activeInstanceId]);
+
+  // Persist layout on change.
+  useEffect(() => {
+    if (!activeInstanceId) return;
+    localStorage.setItem(orderKey(activeInstanceId), JSON.stringify(cardOrder));
+  }, [cardOrder, activeInstanceId]);
+
+  useEffect(() => {
+    if (!activeInstanceId) return;
+    localStorage.setItem(minKey(activeInstanceId), JSON.stringify([...minimizedCards]));
+  }, [minimizedCards, activeInstanceId]);
+
+  const toggleMinimized = useCallback((id: CardId) => {
+    setMinimizedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setCardOrder((curr) => {
+      const oldIdx = curr.indexOf(active.id as CardId);
+      const newIdx = curr.indexOf(over.id as CardId);
+      if (oldIdx < 0 || newIdx < 0) return curr;
+      return arrayMove(curr, oldIdx, newIdx);
+    });
+  }, []);
 
   /**
    * Delete wrapper: captures the full rows being deleted (for undo), then
@@ -280,6 +391,284 @@ export default function Dashboard() {
   // For past years show the full calendar; for the current year truncate at the current month.
   const expenseMonthCount = expenseYear < currentYear ? 12 : currentMonth + 1;
 
+  // Map each card id to its rendered node. Rendered inside a SortableContext
+  // below in the saved order.
+  function renderCard(id: CardId) {
+    const isMin = minimizedCards.has(id);
+    const toggle = () => toggleMinimized(id);
+
+    switch (id) {
+      case 'spending-trends':
+        return (
+          <DashboardCard
+            key={id}
+            id={id}
+            title="Spending Trends"
+            minimized={isMin}
+            onToggleMinimize={toggle}
+            headerActions={
+              <div className="tabs">
+                {(Object.keys(TIME_RANGE_LABELS) as TimeRange[]).map((r) => (
+                  <button
+                    key={r}
+                    className={`tab ${timeRange === r ? 'active' : ''}`}
+                    onClick={() => setTimeRange(r)}
+                  >
+                    {TIME_RANGE_LABELS[r]}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            {transactions.length === 0 ? (
+              <EmptyState message="No transactions yet. Upload a CSV or add entries manually." />
+            ) : (
+              <CategoryLineChart
+                transactions={transactions}
+                timeRange={timeRange}
+                customRange={customRange}
+                onCustomRangeChange={setCustomRange}
+              />
+            )}
+          </DashboardCard>
+        );
+
+      case 'expenses-by-category':
+        return (
+          <DashboardCard
+            key={id}
+            id={id}
+            title="Expenses by Category"
+            minimized={isMin}
+            onToggleMinimize={toggle}
+            headerActions={
+              <>
+                <YearSelector transactions={transactions} value={expenseYear} onChange={setExpenseYear} />
+                {expandedCategory && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => setExpandedCategory(null)}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                    Back to all categories
+                  </button>
+                )}
+              </>
+            }
+          >
+            {monthlyTable.length === 0 ? (
+              <EmptyState message={`No expense data for ${expenseYear}.`} />
+            ) : (
+              <ExpenseCategoryTable
+                monthlyTable={monthlyTable}
+                transactions={transactions}
+                currentMonth={expenseMonthCount - 1}
+                expandedCategory={expandedCategory}
+                onSelect={(c) => setExpandedCategory(c === expandedCategory ? null : c)}
+                onDelete={handleDelete}
+                onUpdateTransaction={handleUpdateTransaction}
+                userCategories={userCategories}
+                addCustomCategory={addCustomCategory}
+                isActiveOwner={isActiveOwner}
+              />
+            )}
+          </DashboardCard>
+        );
+
+      case 'income-vs-expenditures':
+        return (
+          <DashboardCard
+            key={id}
+            id={id}
+            title={
+              <>
+                Income vs. Expenditures
+                {expandedMonth !== null && (
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+                    / {MONTH_NAMES[expandedMonth]}
+                  </span>
+                )}
+              </>
+            }
+            minimized={isMin}
+            onToggleMinimize={toggle}
+            headerActions={
+              <>
+                <YearSelector
+                  transactions={transactions}
+                  incomeEntries={income}
+                  value={incomeYear}
+                  onChange={(y) => { setIncomeYear(y); setExpandedMonth(null); }}
+                />
+                {expandedMonth !== null && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => setExpandedMonth(null)}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                    Back to full year
+                  </button>
+                )}
+              </>
+            }
+          >
+            {monthlyBalance.length === 0 ? (
+              <EmptyState message={`No data for ${incomeYear} yet.`} />
+            ) : expandedMonth === null ? (
+              <>
+                <MonthlyBalanceView
+                  monthlyBalance={monthlyBalance}
+                  onMonthClick={(idx) => setExpandedMonth(idx)}
+                />
+                <div style={{ marginTop: 16 }}>
+                  <h3 style={{ color: 'var(--text-secondary)', marginBottom: 8, fontSize: '1rem' }}>Net Balance</h3>
+                  <NetBalanceView monthlyBalance={monthlyBalance} />
+                </div>
+              </>
+            ) : (
+              <ExpandedMonthView
+                transactions={transactions}
+                incomeEntries={income}
+                year={incomeYear}
+                month={expandedMonth}
+                onDelete={handleDelete}
+                onUpdateTransaction={handleUpdateTransaction}
+                onUpdateIncome={handleUpdateIncome}
+                userCategories={userCategories}
+                addCustomCategory={addCustomCategory}
+                isActiveOwner={isActiveOwner}
+              />
+            )}
+          </DashboardCard>
+        );
+
+      case 'avg-expenditures':
+        return (
+          <DashboardCard
+            key={id}
+            id={id}
+            title="Average Monthly Expenditures"
+            minimized={isMin}
+            onToggleMinimize={toggle}
+            headerActions={
+              <span className="text-xs text-muted">
+                Over {categoryAverages[0]?.months ?? 0} month{(categoryAverages[0]?.months ?? 0) !== 1 ? 's' : ''} of data
+              </span>
+            }
+          >
+            {categoryAverages.length === 0 ? (
+              <EmptyState message="No expense data available yet." />
+            ) : (
+              <>
+                <div className="table-wrapper" style={{ marginBottom: 24 }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th className="num">Avg / Month</th>
+                        <th className="num">Total</th>
+                        <th style={{ width: 160 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryAverages
+                        .sort((a, b) => b.avgPerMonth - a.avgPerMonth)
+                        .map((row) => {
+                          const maxAvg = categoryAverages.reduce((m, r) => Math.max(m, r.avgPerMonth), 0);
+                          const pct = maxAvg > 0 ? (row.avgPerMonth / maxAvg) * 100 : 0;
+                          return (
+                            <tr key={row.category}>
+                              <td>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                  <span
+                                    style={{
+                                      width: 8,
+                                      height: 8,
+                                      borderRadius: '50%',
+                                      background: getCategoryColor(row.category),
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  {row.category}
+                                </span>
+                              </td>
+                              <td className="num">{formatCurrency(row.avgPerMonth)}</td>
+                              <td className="num">{formatCurrency(row.total)}</td>
+                              <td>
+                                <div className="progress-bar-track">
+                                  <div
+                                    className="progress-bar-fill"
+                                    style={{
+                                      width: `${pct}%`,
+                                      background: getCategoryColor(row.category),
+                                    }}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Horizontal bar chart */}
+                <ResponsiveContainer width="100%" height={Math.max(250, categoryAverages.length * 36)}>
+                  <BarChart
+                    layout="vertical"
+                    data={categoryAverages.sort((a, b) => b.avgPerMonth - a.avgPerMonth)}
+                    margin={{ top: 4, right: 24, left: 80, bottom: 4 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis
+                      type="number"
+                      tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="category"
+                      tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={75}
+                    />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.8125rem' }}
+                      formatter={(value: number) => [formatCurrency(value), 'Avg/month']}
+                    />
+                    <Bar dataKey="avgPerMonth" name="Avg/month" radius={[0, 3, 3, 0]}>
+                      {categoryAverages
+                        .sort((a, b) => b.avgPerMonth - a.avgPerMonth)
+                        .map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={getCategoryColor(entry.category)} />
+                        ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </DashboardCard>
+        );
+
+      case 'all-transactions':
+        return (
+          <AllTransactionsCard
+            key={id}
+            cardId={id}
+            minimized={isMin}
+            onToggleMinimize={toggle}
+            transactions={transactions}
+            userCategories={userCategories}
+            addCustomCategory={addCustomCategory}
+            onUpdateTransaction={handleUpdateTransaction}
+            onDelete={handleDelete}
+            isActiveOwner={isActiveOwner}
+          />
+        );
+    }
+  }
+
   return (
     <Layout>
       {/* ─── Summary Stats ─────────────────────────────────────── */}
@@ -314,248 +703,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ─── Section 1: Spending Trends ──────────────────────────── */}
-      <div className="section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Spending Trends</h2>
-            <div className="tabs">
-              {(Object.keys(TIME_RANGE_LABELS) as TimeRange[]).map((r) => (
-                <button
-                  key={r}
-                  className={`tab ${timeRange === r ? 'active' : ''}`}
-                  onClick={() => setTimeRange(r)}
-                >
-                  {TIME_RANGE_LABELS[r]}
-                </button>
-              ))}
-            </div>
-          </div>
-          {transactions.length === 0 ? (
-            <EmptyState message="No transactions yet. Upload a CSV or add entries manually." />
-          ) : (
-            <CategoryLineChart
-              transactions={transactions}
-              timeRange={timeRange}
-              customRange={customRange}
-              onCustomRangeChange={setCustomRange}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* ─── Section 2: Monthly Expense Table ────────────────────── */}
-      <div className="section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Expenses by Category</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <YearSelector transactions={transactions} value={expenseYear} onChange={setExpenseYear} />
-              {expandedCategory && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setExpandedCategory(null)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                  Back to all categories
-                </button>
-              )}
-            </div>
-          </div>
-          {monthlyTable.length === 0 ? (
-            <EmptyState message={`No expense data for ${expenseYear}.`} />
-          ) : (
-            <ExpenseCategoryTable
-              monthlyTable={monthlyTable}
-              transactions={transactions}
-              currentMonth={expenseMonthCount - 1}
-              expandedCategory={expandedCategory}
-              onSelect={(c) => setExpandedCategory(c === expandedCategory ? null : c)}
-              onDelete={handleDelete}
-              onUpdateTransaction={handleUpdateTransaction}
-              userCategories={userCategories}
-              addCustomCategory={addCustomCategory}
-              isActiveOwner={isActiveOwner}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* ─── Section 3: Income vs Expenditures ───────────────────── */}
-      <div className="section">
-        <div className="card">
-          <div className="card-header">
-            <h2>
-              Income vs. Expenditures
-              {expandedMonth !== null && (
-                <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
-                  / {MONTH_NAMES[expandedMonth]}
-                </span>
-              )}
-            </h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <YearSelector
-                transactions={transactions}
-                incomeEntries={income}
-                value={incomeYear}
-                onChange={(y) => { setIncomeYear(y); setExpandedMonth(null); }}
-              />
-              {expandedMonth !== null && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setExpandedMonth(null)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                  Back to full year
-                </button>
-              )}
-            </div>
-          </div>
-          {monthlyBalance.length === 0 ? (
-            <EmptyState message={`No data for ${incomeYear} yet.`} />
-          ) : expandedMonth === null ? (
-            <>
-              <MonthlyBalanceView
-                monthlyBalance={monthlyBalance}
-                onMonthClick={(idx) => setExpandedMonth(idx)}
-              />
-              <div style={{ marginTop: 16 }}>
-                <h3 style={{ color: 'var(--text-secondary)', marginBottom: 8, fontSize: '1rem' }}>Net Balance</h3>
-                <NetBalanceView monthlyBalance={monthlyBalance} />
-              </div>
-            </>
-          ) : (
-            <ExpandedMonthView
-              transactions={transactions}
-              incomeEntries={income}
-              year={incomeYear}
-              month={expandedMonth}
-              onDelete={handleDelete}
-              onUpdateTransaction={handleUpdateTransaction}
-              onUpdateIncome={handleUpdateIncome}
-              userCategories={userCategories}
-              addCustomCategory={addCustomCategory}
-              isActiveOwner={isActiveOwner}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* ─── Section 4: Average Expenditures ─────────────────────── */}
-      <div className="section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Average Monthly Expenditures</h2>
-            <span className="text-xs text-muted">
-              Over {categoryAverages[0]?.months ?? 0} month{(categoryAverages[0]?.months ?? 0) !== 1 ? 's' : ''} of data
-            </span>
-          </div>
-          {categoryAverages.length === 0 ? (
-            <EmptyState message="No expense data available yet." />
-          ) : (
-            <>
-              <div className="table-wrapper" style={{ marginBottom: 24 }}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th className="num">Avg / Month</th>
-                      <th className="num">Total</th>
-                      <th style={{ width: 160 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {categoryAverages
-                      .sort((a, b) => b.avgPerMonth - a.avgPerMonth)
-                      .map((row) => {
-                        const maxAvg = categoryAverages.reduce((m, r) => Math.max(m, r.avgPerMonth), 0);
-                        const pct = maxAvg > 0 ? (row.avgPerMonth / maxAvg) * 100 : 0;
-                        return (
-                          <tr key={row.category}>
-                            <td>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                                <span
-                                  style={{
-                                    width: 8,
-                                    height: 8,
-                                    borderRadius: '50%',
-                                    background: getCategoryColor(row.category),
-                                    flexShrink: 0,
-                                  }}
-                                />
-                                {row.category}
-                              </span>
-                            </td>
-                            <td className="num">{formatCurrency(row.avgPerMonth)}</td>
-                            <td className="num">{formatCurrency(row.total)}</td>
-                            <td>
-                              <div className="progress-bar-track">
-                                <div
-                                  className="progress-bar-fill"
-                                  style={{
-                                    width: `${pct}%`,
-                                    background: getCategoryColor(row.category),
-                                  }}
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Horizontal bar chart */}
-              <ResponsiveContainer width="100%" height={Math.max(250, categoryAverages.length * 36)}>
-                <BarChart
-                  layout="vertical"
-                  data={categoryAverages.sort((a, b) => b.avgPerMonth - a.avgPerMonth)}
-                  margin={{ top: 4, right: 24, left: 80, bottom: 4 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="category"
-                    tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={75}
-                  />
-                  <Tooltip
-                    contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.8125rem' }}
-                    formatter={(value: number) => [formatCurrency(value), 'Avg/month']}
-                  />
-                  <Bar dataKey="avgPerMonth" name="Avg/month" radius={[0, 3, 3, 0]}>
-                    {categoryAverages
-                      .sort((a, b) => b.avgPerMonth - a.avgPerMonth)
-                      .map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={getCategoryColor(entry.category)} />
-                      ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ─── Section 5: All Transactions ─────────────────────────── */}
-      <div className="section">
-        <AllTransactionsCard
-          transactions={transactions}
-          userCategories={userCategories}
-          addCustomCategory={addCustomCategory}
-          onUpdateTransaction={handleUpdateTransaction}
-          onDelete={handleDelete}
-          isActiveOwner={isActiveOwner}
-        />
-      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
+          {cardOrder.map(renderCard)}
+        </SortableContext>
+      </DndContext>
 
       {/* Undo toast — rendered last so it sits on top of everything */}
       {pendingUndo && (
@@ -570,4 +722,3 @@ export default function Dashboard() {
     </Layout>
   );
 }
-

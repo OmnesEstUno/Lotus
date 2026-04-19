@@ -832,3 +832,13 @@ a:hover { color: var(--accent-hover); }
   background: var(--accent);
   color: var(--bg-base);
 }
+
+/* ─── Dashboard card drag handle ─────────────────────────────────────────── */
+.dashboard-card-handle:hover {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+.dashboard-card-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

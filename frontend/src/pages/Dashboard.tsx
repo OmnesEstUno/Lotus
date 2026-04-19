@@ -62,7 +62,7 @@ export default function Dashboard() {
   // Custom categories used by the edit flow
   const { userCategories, addCustomCategory } = useUserCategories();
 
-  const { activeInstanceId } = useWorkspaces();
+  const { activeInstanceId, isActiveOwner } = useWorkspaces();
 
   const refetchAll = useCallback(async () => {
     try {
@@ -315,6 +315,7 @@ export default function Dashboard() {
               onUpdateTransaction={handleUpdateTransaction}
               userCategories={userCategories}
               addCustomCategory={addCustomCategory}
+              isActiveOwner={isActiveOwner}
             />
           )}
         </div>
@@ -359,6 +360,7 @@ export default function Dashboard() {
               onUpdateIncome={handleUpdateIncome}
               userCategories={userCategories}
               addCustomCategory={addCustomCategory}
+              isActiveOwner={isActiveOwner}
             />
           )}
         </div>

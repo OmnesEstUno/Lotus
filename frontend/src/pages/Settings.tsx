@@ -4,6 +4,7 @@ import { IncomeEntry, Transaction, UserCategories } from '../types';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
 import { useCurrentUser } from '../hooks/useCurrentUser';
+import { useWorkspaces } from '../hooks/useWorkspaces';
 import InviteTokensCard from '../components/InviteTokensCard';
 import WorkspacesCard from '../components/WorkspacesCard';
 import ArchivedCard from '../components/dashboard/ArchivedCard';
@@ -17,6 +18,7 @@ import Layout from '../components/layout/Layout';
 export default function Settings() {
   const { userCategories, setUserCategories } = useUserCategories();
   const currentUser = useCurrentUser();
+  const { isActiveOwner } = useWorkspaces();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [income, setIncome] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +80,10 @@ export default function Settings() {
   }
 
   async function handleDelete(name: string) {
+    if (!isActiveOwner) {
+      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      return;
+    }
     const count = categoryCounts.get(name) ?? 0;
     const msg =
       count > 0
@@ -156,6 +162,8 @@ export default function Settings() {
         </div>
       )}
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
       {/* ─── Admin: Invite Tokens ─────────────────────────── */}
       {currentUser === 'admin' && <InviteTokensCard />}
 
@@ -163,7 +171,7 @@ export default function Settings() {
       <WorkspacesCard />
 
       {/* ─── Custom Categories ────────────────────────────── */}
-      <div className="card" style={{ marginBottom: 24 }}>
+      <div className="card">
         <div className="card-header">
           <h2>Custom Categories</h2>
           <span className="text-xs text-muted">
@@ -213,18 +221,20 @@ export default function Settings() {
                         >
                           Rename
                         </button>
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => handleDelete(name)}
-                          disabled={busy}
-                          style={{
-                            background: 'var(--danger-bg)',
-                            color: 'var(--danger)',
-                            border: '1px solid rgba(248,113,113,0.3)',
-                          }}
-                        >
-                          Delete
-                        </button>
+                        {isActiveOwner && (
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => handleDelete(name)}
+                            disabled={busy}
+                            style={{
+                              background: 'var(--danger-bg)',
+                              color: 'var(--danger)',
+                              border: '1px solid rgba(248,113,113,0.3)',
+                            }}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -235,7 +245,7 @@ export default function Settings() {
         )}
       </div>
 
-      {/* ─── Mappings ─────────────────────────────────────── */}
+      {/* ─── Description Mappings ────────────────────────── */}
       <div className="card">
         <div className="card-header">
           <h2>Description Mappings</h2>
@@ -316,14 +326,15 @@ export default function Settings() {
       <ArchivedCard />
 
       {/* ─── Danger Zone ──────────────────────────────────── */}
-      <div style={{ marginTop: 32 }}>
-        <DangerZone
-          transactions={transactions}
-          income={income}
-          userCategories={userCategories}
-          onPurged={refreshTransactions}
-        />
-      </div>
+      <DangerZone
+        transactions={transactions}
+        income={income}
+        userCategories={userCategories}
+        onPurged={refreshTransactions}
+        isActiveOwner={isActiveOwner}
+      />
+
+      </div>{/* end flex column */}
     </Layout>
   );
 }

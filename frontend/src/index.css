@@ -454,6 +454,35 @@ a:hover { color: var(--accent-hover); }
   .login-card { padding: 24px; }
 }
 
+/* ─── Workspace tiles (Settings grid) ───────────────────────────────────── */
+.workspace-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+}
+.workspace-tile-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.workspace-tile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.workspace-tile-actions .btn {
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
 /* ─── Workspace tabs (left sidebar) ─────────────────────────────────────── */
 .workspace-tabs {
   position: sticky;

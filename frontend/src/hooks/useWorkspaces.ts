@@ -6,11 +6,14 @@ import {
   setActiveInstanceIdLocal,
   subscribeActiveInstance,
   getActiveInstanceId,
+  getCurrentUsername,
+  subscribeUsername,
 } from '../api/client';
 
 export function useWorkspaces() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [activeInstanceId, setActiveInstanceIdState] = useState<string | null>(() => getActiveInstanceId());
+  const [currentUser, setCurrentUser] = useState<string | null>(() => getCurrentUsername());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +40,11 @@ export function useWorkspaces() {
     return subscribeActiveInstance((id) => setActiveInstanceIdState(id));
   }, []);
 
+  // Track current user so isActiveOwner stays live across login/logout
+  useEffect(() => {
+    return subscribeUsername((u) => setCurrentUser(u));
+  }, []);
+
   const switchTo = useCallback(async (id: string) => {
     setActiveInstanceIdLocal(id);  // immediate local update + notify
     setActiveInstanceIdState(id);
@@ -47,5 +55,12 @@ export function useWorkspaces() {
     }
   }, []);
 
-  return { instances, activeInstanceId, loading, error, refresh, switchTo };
+  // Defaults to false while instances haven't loaded yet, preventing a
+  // momentary flash of delete buttons for non-owner members.
+  const isActiveOwner: boolean =
+    currentUser !== null &&
+    activeInstanceId !== null &&
+    (instances.find((i) => i.id === activeInstanceId)?.owner === currentUser) === true;
+
+  return { instances, activeInstanceId, loading, error, refresh, switchTo, isActiveOwner };
 }

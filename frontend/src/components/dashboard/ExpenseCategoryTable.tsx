@@ -19,6 +19,7 @@ interface ExpenseCategoryTableProps {
   onUpdateTransaction: (id: string, updates: Parameters<typeof updateTransaction>[1]) => Promise<void>;
   userCategories: UserCategories;
   addCustomCategory: (name: string) => string | null;
+  isActiveOwner?: boolean;
 }
 
 export default function ExpenseCategoryTable({
@@ -31,6 +32,7 @@ export default function ExpenseCategoryTable({
   onUpdateTransaction,
   userCategories,
   addCustomCategory,
+  isActiveOwner = true,
 }: ExpenseCategoryTableProps) {
   const visibleRows = expandedCategory
     ? monthlyTable.filter((r) => r.category === expandedCategory)
@@ -219,6 +221,7 @@ export default function ExpenseCategoryTable({
             userCategories={userCategories}
             addCustomCategory={addCustomCategory}
             emptyMessage={emptyMessage}
+            isActiveOwner={isActiveOwner}
           />
         </div>
       )}

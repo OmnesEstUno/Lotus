@@ -23,6 +23,7 @@ interface ExpandedMonthViewProps {
   onUpdateIncome: (id: string, updates: Parameters<typeof updateIncome>[1]) => Promise<void>;
   userCategories: UserCategories;
   addCustomCategory: (name: string) => string | null;
+  isActiveOwner?: boolean;
 }
 
 function ExpandedMonthView({
@@ -35,6 +36,7 @@ function ExpandedMonthView({
   onUpdateIncome,
   userCategories,
   addCustomCategory,
+  isActiveOwner = true,
 }: ExpandedMonthViewProps) {
   const dailyBalance = buildDailyBalance(transactions, incomeEntries, year, month);
   const rawEvents = buildMonthEvents(transactions, incomeEntries, year, month);
@@ -189,6 +191,7 @@ function ExpandedMonthView({
             userCategories={userCategories}
             addCustomCategory={addCustomCategory}
             emptyMessage={searchQuery.trim() ? `No entries matching "${searchQuery}".` : `No activity recorded for ${monthLabel}.`}
+            isActiveOwner={isActiveOwner}
           />
         )}
       </div>

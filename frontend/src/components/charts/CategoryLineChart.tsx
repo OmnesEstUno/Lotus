@@ -261,6 +261,10 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             if (!activeCategories.has(cat)) return null;
             const emphasized = isEmphasized(cat);
             const faded = isFaded(cat);
+            const nonZeroCount = data.filter((d) => {
+              const v = d[cat] as number | undefined;
+              return v !== undefined && v > 0;
+            }).length;
             return (
               <Line
                 key={cat}
@@ -268,7 +272,7 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
                 dataKey={cat}
                 stroke={getCategoryColor(cat)}
                 strokeWidth={emphasized ? 3 : 1.5}
-                dot={data.length <= 1 ? {
+                dot={nonZeroCount <= 1 ? {
                   r: 4,
                   strokeWidth: 2,
                   stroke: getCategoryColor(cat),

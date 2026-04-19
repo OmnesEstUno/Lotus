@@ -1,6 +1,30 @@
-import { IncomeEntry, Transaction, UserCategories } from '../types';
+import { IncomeEntry, Instance, Transaction, UserCategories } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
+
+// ─── Same-tab active-instance listeners ──────────────────────────────────────
+
+const ACTIVE_INSTANCE_STORAGE_KEY = 'ft_active_instance';
+const activeInstanceListeners = new Set<(id: string | null) => void>();
+
+function notifyActiveInstanceChange(id: string | null): void {
+  activeInstanceListeners.forEach((fn) => fn(id));
+}
+
+export function subscribeActiveInstance(fn: (id: string | null) => void): () => void {
+  activeInstanceListeners.add(fn);
+  return () => activeInstanceListeners.delete(fn);
+}
+
+export function getActiveInstanceId(): string | null {
+  return localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY);
+}
+
+export function setActiveInstanceIdLocal(id: string | null): void {
+  if (id) localStorage.setItem(ACTIVE_INSTANCE_STORAGE_KEY, id);
+  else localStorage.removeItem(ACTIVE_INSTANCE_STORAGE_KEY);
+  notifyActiveInstanceChange(id);
+}
 
 // ─── Same-tab username change listeners ──────────────────────────────────────
 
@@ -41,12 +65,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
+  const activeInstanceId = getActiveInstanceId();
+  if (activeInstanceId) {
+    headers['X-Instance-Id'] = activeInstanceId;
+  }
+
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     clearToken();
     localStorage.removeItem('ft_username');
     notifyUsernameChange(null);
+    localStorage.removeItem(ACTIVE_INSTANCE_STORAGE_KEY);
+    notifyActiveInstanceChange(null);
     window.location.hash = '#/login';
     throw new Error('Session expired. Please log in again.');
   }
@@ -103,6 +134,8 @@ export async function logout(): Promise<void> {
     clearToken();
     localStorage.removeItem('ft_username');
     notifyUsernameChange(null);
+    localStorage.removeItem(ACTIVE_INSTANCE_STORAGE_KEY);
+    notifyActiveInstanceChange(null);
   }
 }
 
@@ -115,6 +148,32 @@ export async function migrateLegacy(username: string, password: string): Promise
 
 export function isAuthenticated(): boolean {
   return !!getToken();
+}
+
+// ─── Instances ───────────────────────────────────────────────────────────────
+
+export async function getInstances(): Promise<{ instances: Instance[]; activeInstanceId: string | null }> {
+  return request('/api/instances');
+}
+
+export async function createInstance(name: string): Promise<Instance> {
+  return request('/api/instances', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+export async function renameInstance(id: string, name: string): Promise<Instance> {
+  return request(`/api/instances/${id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+}
+
+export async function deleteInstance(id: string): Promise<void> {
+  await request(`/api/instances/${id}`, { method: 'DELETE' });
+}
+
+export async function removeInstanceMember(id: string, username: string): Promise<Instance> {
+  return request(`/api/instances/${id}/members/${encodeURIComponent(username)}`, { method: 'DELETE' });
+}
+
+export async function setActiveInstance(instanceId: string): Promise<void> {
+  await request('/api/instances/active', { method: 'PUT', body: JSON.stringify({ instanceId }) });
 }
 
 // ─── Transactions ────────────────────────────────────────────────────────────
@@ -265,4 +324,30 @@ export async function listInvites(): Promise<{ invites: InviteSummary[] }> {
 }
 export async function deleteInvite(id: string): Promise<{ ok: true }> {
   return request(`/api/admin/invites/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// ─── Workspace Invites ────────────────────────────────────────────────────────
+
+export interface WorkspaceInviteSummary {
+  id: string;
+  expiresAt: number;
+  createdAt: number;
+  usedBy: string | null;
+  token: string;
+}
+
+export async function createWorkspaceInvite(instanceId: string): Promise<{ id: string; token: string; expiresAt: number }> {
+  return request(`/api/instances/${instanceId}/invites`, { method: 'POST' });
+}
+export async function listWorkspaceInvites(instanceId: string): Promise<{ invites: WorkspaceInviteSummary[] }> {
+  return request(`/api/instances/${instanceId}/invites`);
+}
+export async function deleteWorkspaceInvite(instanceId: string, inviteId: string): Promise<{ ok: true }> {
+  return request(`/api/instances/${instanceId}/invites/${encodeURIComponent(inviteId)}`, { method: 'DELETE' });
+}
+export async function acceptWorkspaceInvite(token: string): Promise<{ id: string; name: string; owner: string; members: string[]; createdAt: string }> {
+  return request('/api/instances/invites/accept', { method: 'POST', body: JSON.stringify({ token }) });
+}
+export async function getWorkspaceInviteMeta(token: string): Promise<{ instanceName: string; ownerUsername: string; expiresAt: number; usedBy: string | null; alreadyMember: boolean }> {
+  return request(`/api/instances/invites/meta?token=${encodeURIComponent(token)}`);
 }

@@ -5,6 +5,7 @@ import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import InviteTokensCard from '../components/InviteTokensCard';
+import WorkspacesCard from '../components/WorkspacesCard';
 import Layout from '../components/layout/Layout';
 
 /**
@@ -153,6 +154,9 @@ export default function Settings() {
 
       {/* ─── Admin: Invite Tokens ─────────────────────────── */}
       {currentUser === 'admin' && <InviteTokensCard />}
+
+      {/* ─── Workspaces ───────────────────────────────────── */}
+      <WorkspacesCard />
 
       {/* ─── Custom Categories ────────────────────────────── */}
       <div className="card" style={{ marginBottom: 24 }}>

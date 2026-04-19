@@ -64,6 +64,14 @@ export interface IncomeEntry {
   source: 'manual' | 'paystub';
 }
 
+export interface Instance {
+  id: string;
+  name: string;
+  owner: string;        // username
+  members: string[];    // usernames including owner
+  createdAt: string;
+}
+
 export type TimeRange = 'week' | 'month' | '3month' | 'year' | 'all';
 
 export interface ParsedExpenseRow {

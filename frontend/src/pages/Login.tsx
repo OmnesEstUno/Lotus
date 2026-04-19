@@ -200,6 +200,12 @@ export default function Login() {
     setLoading(true);
     try {
       await verify2FA(preAuthToken, totpCode);
+      const pending = sessionStorage.getItem('ft_pending_workspace_invite');
+      if (pending) {
+        sessionStorage.removeItem('ft_pending_workspace_invite');
+        window.location.hash = `#/workspace-invite?token=${encodeURIComponent(pending)}`;
+        return;
+      }
       navigate('/dashboard');
     } catch (err) {
       console.error(err);

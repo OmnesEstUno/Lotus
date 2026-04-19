@@ -36,6 +36,7 @@ import ExpandedMonthView from '../components/dashboard/ExpandedMonthView';
 import Toast from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import { useUserCategories } from '../hooks/useUserCategories';
+import { useWorkspaces } from '../hooks/useWorkspaces';
 import Layout from '../components/layout/Layout';
 import DangerZone from '../components/DangerZone';
 // Undo-toast payload: what was just deleted, so we can restore it if the
@@ -61,6 +62,8 @@ export default function Dashboard() {
   // Custom categories used by the edit flow
   const { userCategories, addCustomCategory } = useUserCategories();
 
+  const { activeInstanceId } = useWorkspaces();
+
   const refetchAll = useCallback(async () => {
     try {
       const [txns, inc] = await Promise.all([getTransactions(), getIncome()]);
@@ -71,9 +74,23 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Initial load — wait until we know whether there's an active instance.
+  // activeInstanceId is null until useWorkspaces resolves, so delay the first
+  // fetch until it's set. When there's no instance, show empty gracefully.
   useEffect(() => {
+    if (activeInstanceId === undefined) return; // still resolving (shouldn't happen with null init)
+    setLoading(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refetch whenever the active workspace changes (including first real load).
+  useEffect(() => {
+    if (!activeInstanceId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     refetchAll().finally(() => setLoading(false));
-  }, [refetchAll]);
+  }, [activeInstanceId, refetchAll]);
 
   /**
    * Delete wrapper: captures the full rows being deleted (for undo), then
@@ -173,6 +190,21 @@ export default function Dashboard() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: 16 }}>
           <div className="spinner" />
           <span style={{ color: 'var(--text-muted)' }}>Loading your financial data…</span>
+        </div>
+      </Layout>
+    );
+  }
+
+  // No active workspace yet — show a neutral empty state instead of an error.
+  if (!activeInstanceId) {
+    return (
+      <Layout>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400, flexDirection: 'column', gap: 12 }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>Select a workspace to view your dashboard.</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            You can create or join a workspace from the{' '}
+            <a href="/settings" style={{ color: 'var(--accent)' }}>Settings</a> page.
+          </span>
         </div>
       </Layout>
     );

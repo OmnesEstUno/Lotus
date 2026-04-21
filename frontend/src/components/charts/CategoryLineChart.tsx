@@ -13,8 +13,8 @@ import { Category, CustomDateRange, TimeRange } from '../../types';
 import { getCategoryColor } from '../../utils/categories';
 import { buildLineChartData, formatCurrency, getMaxValue, getTrendingCategories } from '../../utils/dataProcessing';
 import { Transaction } from '../../types';
-import CheckmarkToggle from '../CheckmarkToggle';
 import DateRangePicker from '../DateRangePicker';
+import CategoryChipRow from '../dashboard/CategoryChipRow';
 
 interface Props {
   transactions: Transaction[];
@@ -160,56 +160,26 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
       })()}
 
       {/* Legend with CheckmarkToggle chips */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-        {/* Row 1: chips */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'center' }}>
-          {visibleCategories.map((cat) => {
-            const isActive = activeCategories.has(cat);
-            return (
-              <div
-                key={cat}
-                style={{ opacity: isFaded(cat) ? 0.4 : 1, transition: 'opacity 0.15s' }}
-              >
-                <CheckmarkToggle
-                  label={cat}
-                  color={getCategoryColor(cat)}
-                  active={isActive}
-                  size="sm"
-                  onToggle={() => toggle(cat)}
-                  onHover={() => setHoveredLine(cat)}
-                  onLeave={() => setHoveredLine(null)}
-                />
-              </div>
-            );
-          })}
-        </div>
-        {/* Row 2: action buttons */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      <CategoryChipRow
+        chips={visibleCategories.map((c) => ({ key: c, label: c }))}
+        isActive={(c) => activeCategories.has(c)}
+        onToggle={toggle}
+        onSelectAll={(allKeys) => setActiveCategories(new Set(allKeys))}
+        onDeselectAll={() => setActiveCategories(new Set())}
+        onHover={(c) => setHoveredLine(c)}
+        onLeave={() => setHoveredLine(null)}
+        opacityFor={(c) => (isFaded(c) ? 0.4 : 1)}
+        extraActions={selectedSet.size > 0 ? (
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
-            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-            onClick={() => setActiveCategories(new Set(visibleCategories))}
+            style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: '0.75rem' }}
+            onClick={() => setSelectedSet(new Set())}
           >
-            Select All
+            Clear selection
           </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-            onClick={() => setActiveCategories(new Set())}
-          >
-            Deselect All
-          </button>
-          {selectedSet.size > 0 && (
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: '0.75rem' }}
-              onClick={() => setSelectedSet(new Set())}
-            >
-              Clear selection
-            </button>
-          )}
-        </div>
-      </div>
+        ) : undefined}
+      />
 
       {activeCategories.size === 0 ? (
         <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>

@@ -7,11 +7,10 @@ import { updateTransaction, updateIncome } from '../../api/client';
 import {
   buildDailyBalance, buildMonthEvents, formatCurrency, MONTH_NAMES,
 } from '../../utils/dataProcessing';
-import { getCategoryColor } from '../../utils/categories';
 import { INCOME_COLOR, EXPENSE_COLOR, formatAxisCurrency } from './constants';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 import MonthTotalsBar from './MonthTotalsBar';
-import CheckmarkToggle from '../CheckmarkToggle';
+import CategoryChipRow from './CategoryChipRow';
 
 // ─── Monthly balance: expanded (per-month) view ────────────────────────────
 
@@ -188,8 +187,8 @@ function ExpandedMonthView({
           <h3 style={{ marginBottom: 12, color: 'var(--text-secondary)' }}>
             {monthLabel} summary
           </h3>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-            {totalIncome > 0 && (
+          {totalIncome > 0 && (
+            <div style={{ marginBottom: 12 }}>
               <span
                 className="chip"
                 style={{
@@ -201,40 +200,25 @@ function ExpandedMonthView({
               >
                 Income: {formatCurrency(totalIncome)}
               </span>
-            )}
-            {/* ── Task 15: CheckmarkToggle chips for category filter ───── */}
-            {[...categoryTotals.entries()]
+            </div>
+          )}
+          <CategoryChipRow
+            chips={[...categoryTotals.entries()]
               .sort((a, b) => b[1] - a[1])
-              .map(([cat, total]) => (
-                <CheckmarkToggle
-                  key={cat}
-                  size="sm"
-                  label={`${cat}: ${formatCurrency(total)}`}
-                  color={getCategoryColor(cat)}
-                  active={selectedCategories === null || selectedCategories.has(cat)}
-                  onToggle={() => setSelectedCategories((prev) => {
-                    const base = prev ?? new Set(Array.from(categoryTotals.keys()));
-                    const next = new Set(base);
-                    if (next.has(cat)) next.delete(cat); else next.add(cat);
-                    return next;
-                  })}
-                />
-              ))}
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-              onClick={() => setSelectedCategories(new Set(Array.from(categoryTotals.keys())))}
-            >
-              Select All
-            </button>
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-              onClick={() => setSelectedCategories(new Set())}
-            >
-              Deselect All
-            </button>
-          </div>
+              .map(([cat, total]) => ({
+                key: cat,
+                label: `${cat}: ${formatCurrency(total)}`,
+              }))}
+            isActive={(c) => selectedCategories === null || selectedCategories.has(c)}
+            onToggle={(c) => setSelectedCategories((prev) => {
+              const base = prev ?? new Set(Array.from(categoryTotals.keys()));
+              const next = new Set(base);
+              if (next.has(c)) next.delete(c); else next.add(c);
+              return next;
+            })}
+            onSelectAll={(allKeys) => setSelectedCategories(new Set(allKeys))}
+            onDeselectAll={() => setSelectedCategories(new Set())}
+          />
         </div>
       )}
 

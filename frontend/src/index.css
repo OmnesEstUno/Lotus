@@ -547,6 +547,10 @@ a:hover { color: var(--accent-hover); }
   font-weight: 600;
 }
 
+.workspace-tab:not(.active) {
+  width: 75%;
+}
+
 /* Dim other tabs while one is hovered */
 .workspace-tabs:hover .workspace-tab:not(:hover):not(.active) {
   background: rgba(39, 39, 42, 0.15);

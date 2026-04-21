@@ -54,6 +54,7 @@ import Toast from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
+import { useDashboardLayout, CardId } from '../hooks/useDashboardLayout';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
 
@@ -63,30 +64,6 @@ interface PendingUndo {
   transactions: Transaction[];
   income: IncomeEntry[];
   label: string;
-}
-
-// Stable identifiers for each draggable card. Order here is the default
-// layout when no per-instance preference exists in localStorage.
-const CARD_IDS = [
-  'spending-trends',
-  'expenses-by-category',
-  'income-vs-expenditures',
-  'avg-expenditures',
-  'all-transactions',
-] as const;
-type CardId = (typeof CARD_IDS)[number];
-
-const orderKey = (instanceId: string) => `dashboard:cardOrder:${instanceId}`;
-const minKey = (instanceId: string) => `dashboard:minimized:${instanceId}`;
-
-// Merge a persisted order with the canonical CARD_IDS: drop unknown ids and
-// append any new ids that didn't exist when the preference was saved. This
-// keeps older localStorage values forward-compatible when we add cards.
-function reconcileOrder(saved: string[] | null): CardId[] {
-  if (!saved) return [...CARD_IDS];
-  const valid = saved.filter((id): id is CardId => (CARD_IDS as readonly string[]).includes(id));
-  const missing = CARD_IDS.filter((id) => !valid.includes(id));
-  return [...valid, ...missing];
 }
 
 export default function Dashboard() {
@@ -104,11 +81,6 @@ export default function Dashboard() {
   const [avgYear, setAvgYear] = useState(new Date().getFullYear());
   const [incomeYear, setIncomeYear] = useState(new Date().getFullYear());
 
-  // Card layout state: order + which cards are minimized. Persisted per
-  // active workspace so each instance remembers its own layout.
-  const [cardOrder, setCardOrder] = useState<CardId[]>([...CARD_IDS]);
-  const [minimizedCards, setMinimizedCards] = useState<Set<CardId>>(new Set());
-
   // Undo toast — populated right after a successful delete
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
 
@@ -116,6 +88,16 @@ export default function Dashboard() {
   const { userCategories, addCustomCategory } = useUserCategories();
 
   const { activeInstanceId, isActiveOwner } = useWorkspaces();
+
+  // Card layout state: order + which cards are minimized + which are hidden.
+  // Persisted per active workspace so each instance remembers its own layout.
+  const {
+    cardOrder,
+    setCardOrder,
+    minimized: minimizedCards,
+    toggleMinimized,
+    hidden,
+  } = useDashboardLayout(activeInstanceId);
 
   // Drag sensors. MouseSensor fires immediately on desktop; TouchSensor
   // requires a 200ms long-press so mobile scrolls aren't hijacked. Keyboard
@@ -163,46 +145,6 @@ export default function Dashboard() {
     setLoading(true);
     refetchAll().finally(() => setLoading(false));
   }, [activeInstanceId, refetchAll]);
-
-  // Load saved card order + minimized state when the active workspace changes.
-  useEffect(() => {
-    if (!activeInstanceId) return;
-    try {
-      const orderRaw = localStorage.getItem(orderKey(activeInstanceId));
-      const parsedOrder = orderRaw ? (JSON.parse(orderRaw) as string[]) : null;
-      setCardOrder(reconcileOrder(parsedOrder));
-    } catch {
-      setCardOrder([...CARD_IDS]);
-    }
-    try {
-      const minRaw = localStorage.getItem(minKey(activeInstanceId));
-      const parsedMin = minRaw ? (JSON.parse(minRaw) as string[]) : [];
-      const valid = parsedMin.filter((id): id is CardId => (CARD_IDS as readonly string[]).includes(id));
-      setMinimizedCards(new Set(valid));
-    } catch {
-      setMinimizedCards(new Set());
-    }
-  }, [activeInstanceId]);
-
-  // Persist layout on change.
-  useEffect(() => {
-    if (!activeInstanceId) return;
-    localStorage.setItem(orderKey(activeInstanceId), JSON.stringify(cardOrder));
-  }, [cardOrder, activeInstanceId]);
-
-  useEffect(() => {
-    if (!activeInstanceId) return;
-    localStorage.setItem(minKey(activeInstanceId), JSON.stringify([...minimizedCards]));
-  }, [minimizedCards, activeInstanceId]);
-
-  const toggleMinimized = useCallback((id: CardId) => {
-    setMinimizedCards((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
@@ -734,8 +676,8 @@ export default function Dashboard() {
       </div>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
-          {cardOrder.map(renderCard)}
+        <SortableContext items={cardOrder.filter((id) => !hidden.has(id))} strategy={verticalListSortingStrategy}>
+          {cardOrder.filter((id) => !hidden.has(id)).map(renderCard)}
         </SortableContext>
       </DndContext>
 

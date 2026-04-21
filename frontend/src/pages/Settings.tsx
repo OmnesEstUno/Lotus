@@ -5,6 +5,7 @@ import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
+import { useDashboardLayout, CARD_IDS, CARD_LABELS } from '../hooks/useDashboardLayout';
 import InviteTokensCard from '../components/InviteTokensCard';
 import WorkspacesCard from '../components/WorkspacesCard';
 import ArchivedCard from '../components/dashboard/ArchivedCard';
@@ -18,7 +19,8 @@ import Layout from '../components/layout/Layout';
 export default function Settings() {
   const { userCategories, setUserCategories } = useUserCategories();
   const currentUser = useCurrentUser();
-  const { isActiveOwner } = useWorkspaces();
+  const { isActiveOwner, activeInstanceId } = useWorkspaces();
+  const { hidden, toggleHidden } = useDashboardLayout(activeInstanceId);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [income, setIncome] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -169,6 +171,29 @@ export default function Settings() {
 
       {/* ─── Workspaces ───────────────────────────────────── */}
       <WorkspacesCard />
+
+      {/* ─── Dashboard Card Visibility ────────────────────── */}
+      <div className="card">
+        <div className="card-header">
+          <h2>Dashboard Card Visibility</h2>
+          <span className="text-xs text-muted">{CARD_IDS.length - hidden.size} visible</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {CARD_IDS.map((id) => (
+            <label
+              key={id}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, cursor: 'pointer' }}
+            >
+              <span>{CARD_LABELS[id]}</span>
+              <input
+                type="checkbox"
+                checked={!hidden.has(id)}
+                onChange={() => toggleHidden(id)}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
 
       {/* ─── Custom Categories ────────────────────────────── */}
       <div className="card">

@@ -38,7 +38,7 @@ export default function YearSelector({ transactions, incomeEntries, value, onCha
   return (
     <select
       className="select"
-      style={{ width: 'auto', padding: '5px 10px', fontSize: '0.8125rem' }}
+      style={{ width: 'auto', minWidth: 120, padding: '5px 10px', fontSize: '0.8125rem' }}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
     >

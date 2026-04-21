@@ -16,7 +16,7 @@ function MonthlyBalanceView({ monthlyBalance, onMonthClick }: MonthlyBalanceView
   return (
     <>
       {/* Numeric table — rows are clickable when onMonthClick is provided */}
-      <div className="table-wrapper" style={{ marginBottom: 24 }}>
+      <div className="table-wrapper monthly-balance-scroll" style={{ marginBottom: 24 }}>
         <table className="table">
           <thead>
             <tr>
@@ -26,6 +26,21 @@ function MonthlyBalanceView({ monthlyBalance, onMonthClick }: MonthlyBalanceView
               <th className="num">Surplus / Deficit</th>
             </tr>
           </thead>
+          <tfoot>
+            {/* YTD totals — pinned to the bottom of the scroll container */}
+            <tr style={{ background: 'var(--bg-elevated)', fontWeight: 600 }}>
+              <td>YTD Total</td>
+              <td className="num text-success">
+                {formatCurrency(monthlyBalance.reduce((s, r) => s + r.income, 0))}
+              </td>
+              <td className="num text-danger">
+                {formatCurrency(monthlyBalance.reduce((s, r) => s + r.expenses, 0))}
+              </td>
+              <td className={`num ${monthlyBalance.reduce((s, r) => s + r.surplus, 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                {formatCurrency(monthlyBalance.reduce((s, r) => s + r.surplus, 0))}
+              </td>
+            </tr>
+          </tfoot>
           <tbody>
             {monthlyBalance.map((row) => (
               <tr
@@ -42,19 +57,6 @@ function MonthlyBalanceView({ monthlyBalance, onMonthClick }: MonthlyBalanceView
                 </td>
               </tr>
             ))}
-            {/* YTD totals */}
-            <tr style={{ background: 'var(--bg-elevated)', fontWeight: 600 }}>
-              <td>YTD Total</td>
-              <td className="num text-success">
-                {formatCurrency(monthlyBalance.reduce((s, r) => s + r.income, 0))}
-              </td>
-              <td className="num text-danger">
-                {formatCurrency(monthlyBalance.reduce((s, r) => s + r.expenses, 0))}
-              </td>
-              <td className={`num ${monthlyBalance.reduce((s, r) => s + r.surplus, 0) >= 0 ? 'text-success' : 'text-danger'}`}>
-                {formatCurrency(monthlyBalance.reduce((s, r) => s + r.surplus, 0))}
-              </td>
-            </tr>
           </tbody>
         </table>
       </div>

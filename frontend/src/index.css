@@ -856,3 +856,21 @@ a:hover { color: var(--accent-hover); }
 .net-balance-chart .recharts-bar-rectangle rect {
   transition: fill-opacity 0.2s ease-in-out;
 }
+
+/* ─── Monthly balance table: scrollable body with sticky header + footer ── */
+.monthly-balance-scroll {
+  max-height: 880px; /* ≈ 24 rows at ~37px each */
+  overflow-y: auto;
+}
+.monthly-balance-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 2;
+}
+.monthly-balance-scroll tfoot td {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-card);
+  z-index: 2;
+}

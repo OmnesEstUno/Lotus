@@ -39,52 +39,69 @@ function readSet(key: string): Set<CardId> {
 }
 
 export function useDashboardLayout(instanceId: string | null | undefined) {
-  const [cardOrder, setCardOrder] = useState<CardId[]>([...CARD_IDS]);
-  const [minimized, setMinimized] = useState<Set<CardId>>(new Set());
-  const [hidden, setHidden] = useState<Set<CardId>>(new Set());
+  const [cardOrder, setCardOrderState] = useState<CardId[]>([...CARD_IDS]);
+  const [minimized, setMinimizedState] = useState<Set<CardId>>(new Set());
+  const [hidden, setHiddenState] = useState<Set<CardId>>(new Set());
 
+  // Load persisted state whenever the active workspace changes.
   useEffect(() => {
     if (!instanceId) return;
     try {
       const raw = localStorage.getItem(orderKey(instanceId));
-      setCardOrder(reconcileOrder(raw ? (JSON.parse(raw) as string[]) : null));
+      setCardOrderState(reconcileOrder(raw ? (JSON.parse(raw) as string[]) : null));
     } catch {
-      setCardOrder([...CARD_IDS]);
+      setCardOrderState([...CARD_IDS]);
     }
-    setMinimized(readSet(minKey(instanceId)));
-    setHidden(readSet(hiddenKey(instanceId)));
+    setMinimizedState(readSet(minKey(instanceId)));
+    setHiddenState(readSet(hiddenKey(instanceId)));
   }, [instanceId]);
 
-  useEffect(() => {
-    if (!instanceId) return;
-    localStorage.setItem(orderKey(instanceId), JSON.stringify(cardOrder));
-  }, [cardOrder, instanceId]);
+  // Writes happen synchronously inside setters (not useEffects) to avoid
+  // the initial-mount clobber pattern where a save effect fires before the
+  // load effect has set state.
 
-  useEffect(() => {
-    if (!instanceId) return;
-    localStorage.setItem(minKey(instanceId), JSON.stringify([...minimized]));
-  }, [minimized, instanceId]);
+  const setCardOrder = useCallback(
+    (update: CardId[] | ((prev: CardId[]) => CardId[])) => {
+      setCardOrderState((prev) => {
+        const next = typeof update === 'function' ? update(prev) : update;
+        if (instanceId) {
+          localStorage.setItem(orderKey(instanceId), JSON.stringify(next));
+        }
+        return next;
+      });
+    },
+    [instanceId],
+  );
 
-  useEffect(() => {
-    if (!instanceId) return;
-    localStorage.setItem(hiddenKey(instanceId), JSON.stringify([...hidden]));
-  }, [hidden, instanceId]);
+  const toggleMinimized = useCallback(
+    (id: CardId) => {
+      setMinimizedState((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        if (instanceId) {
+          localStorage.setItem(minKey(instanceId), JSON.stringify([...next]));
+        }
+        return next;
+      });
+    },
+    [instanceId],
+  );
 
-  const toggleMinimized = useCallback((id: CardId) => {
-    setMinimized((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleHidden = useCallback((id: CardId) => {
-    setHidden((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleHidden = useCallback(
+    (id: CardId) => {
+      setHiddenState((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        if (instanceId) {
+          localStorage.setItem(hiddenKey(instanceId), JSON.stringify([...next]));
+        }
+        return next;
+      });
+    },
+    [instanceId],
+  );
 
   return { cardOrder, setCardOrder, minimized, toggleMinimized, hidden, toggleHidden };
 }

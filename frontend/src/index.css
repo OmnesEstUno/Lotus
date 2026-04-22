@@ -508,9 +508,10 @@ a:hover { color: var(--accent-hover); }
 /* ─── Workspace tabs (left sidebar) ─────────────────────────────────────── */
 .workspace-tabs {
   position: sticky;
-  top: 56px;               /* below navbar — matches .navbar height */
+  top: 50%;
+  transform: translateY(-50%);
   align-self: flex-start;
-  max-height: calc(100vh - 56px);
+  max-height: 90vh;
   overflow-y: auto;
   width: 150px;
   flex-shrink: 0;

@@ -5,7 +5,25 @@ import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
-import { useDashboardLayout, CARD_IDS, CARD_LABELS } from '../hooks/useDashboardLayout';
+import { useDashboardLayout, CARD_LABELS, CardId } from '../hooks/useDashboardLayout';
+import {
+  DndContext,
+  DragEndEvent,
+  MouseSensor,
+  TouchSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import InviteTokensCard from '../components/InviteTokensCard';
 import ToggleSwitch from '../components/ToggleSwitch';
 import WorkspacesCard from '../components/WorkspacesCard';
@@ -15,6 +33,60 @@ import FeatureRequestCard from '../components/FeatureRequestCard';
 import FeatureRequestsAdminCard from '../components/FeatureRequestsAdminCard';
 import Layout from '../components/layout/Layout';
 
+interface CardVisibilityRowProps {
+  id: CardId;
+  label: string;
+  checked: boolean;
+  onToggle: () => void;
+}
+
+function CardVisibilityRow({ id, label, checked, onToggle }: CardVisibilityRowProps) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '6px 0',
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <button
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        type="button"
+        aria-label={`Drag to reorder ${label}`}
+        className="dashboard-card-handle"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 28,
+          height: 28,
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text-muted)',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          borderRadius: 6,
+          touchAction: 'none',
+          flexShrink: 0,
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>drag_indicator</span>
+      </button>
+      <span style={{ flex: 1 }}>{label}</span>
+      <ToggleSwitch
+        checked={checked}
+        onChange={onToggle}
+        ariaLabel={`${checked ? 'Hide' : 'Show'} ${label} on dashboard`}
+      />
+    </div>
+  );
+}
+
 /**
  * Settings page — currently hosts management of user-created custom
  * categories and the pattern→category mappings.
@@ -23,7 +95,23 @@ export default function Settings() {
   const { userCategories, setUserCategories } = useUserCategories();
   const currentUser = useCurrentUser();
   const { isActiveOwner, activeInstanceId } = useWorkspaces();
-  const { hidden, toggleHidden } = useDashboardLayout(activeInstanceId);
+  const { cardOrder, setCardOrder, hidden, toggleHidden } = useDashboardLayout(activeInstanceId);
+  const sensors = useSensors(
+    useSensor(MouseSensor),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleCardOrderDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setCardOrder((curr) => {
+      const oldIdx = curr.indexOf(active.id as CardId);
+      const newIdx = curr.indexOf(over.id as CardId);
+      if (oldIdx < 0 || newIdx < 0) return curr;
+      return arrayMove(curr, oldIdx, newIdx);
+    });
+  }
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [income, setIncome] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -179,23 +267,30 @@ export default function Settings() {
       <div className="card">
         <div className="card-header">
           <h2>Dashboard Card Visibility</h2>
-          <span className="text-xs text-muted">{CARD_IDS.length - hidden.size} visible</span>
+          <span className="text-xs text-muted">{cardOrder.length - hidden.size} visible</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {CARD_IDS.map((id) => (
-            <div
-              key={id}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
-            >
-              <span>{CARD_LABELS[id]}</span>
-              <ToggleSwitch
-                checked={!hidden.has(id)}
-                onChange={() => toggleHidden(id)}
-                ariaLabel={`${!hidden.has(id) ? 'Hide' : 'Show'} ${CARD_LABELS[id]} on dashboard`}
-              />
+        <p className="text-xs text-muted" style={{ marginBottom: 12 }}>
+          Drag rows to change the order on your dashboard. Toggle off to hide a card.
+        </p>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleCardOrderDragEnd}
+        >
+          <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {cardOrder.map((id) => (
+                <CardVisibilityRow
+                  key={id}
+                  id={id}
+                  label={CARD_LABELS[id]}
+                  checked={!hidden.has(id)}
+                  onToggle={() => toggleHidden(id)}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
       </div>
 
       {/* ─── Custom Categories ────────────────────────────── */}

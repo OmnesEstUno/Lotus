@@ -17,7 +17,17 @@ Full review of frontend/ and worker/ per the code-review-cleanup plan.
 ## Findings by Category
 
 ### Dead Code / Unused Imports
-(Populated in Phase 1.)
+
+**Task 1.1 result: No unused imports found.**
+
+All `.ts` / `.tsx` files under `frontend/src/` and `worker/src/` were scanned. Every imported symbol is referenced at least once outside its import line. Verification approach:
+
+1. `tsc --noEmit` with `noUnusedLocals: true` — zero errors on both frontend and worker.
+2. Manual grep of each imported symbol in all 6 known-heavy files (DataEntry.tsx, Dashboard.tsx, Settings.tsx, Login.tsx, TransactionDrillDown.tsx, worker/src/index.ts) — all symbols referenced.
+3. Manual grep of every import in every remaining `.ts`/`.tsx` file — all symbols referenced.
+
+**Notable observation (not an unused import, note for style cleanup):**
+- `frontend/src/components/charts/CategoryLineChart.tsx` imports from `'../../types'` in two separate `import` statements (line 12 and line 15). Both are used; they could be merged into one statement for tidiness. This is a style issue, not an unused import, and is out of scope for Task 1.1.
 
 ### Duplication
 (Populated in Phases 2–3.)

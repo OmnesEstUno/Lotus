@@ -2,6 +2,43 @@ import { format, startOfWeek, startOfMonth, subDays, subMonths, parseISO, isWith
 import { Category, CustomDateRange, IncomeEntry, TimeRange, Transaction } from '../types';
 import { MONTH_NAMES_SHORT } from './dateConstants';
 
+// ─── Period Accumulation Helper ──────────────────────────────────────────────
+
+interface PeriodBucket { income: number; expenses: number; }
+
+/**
+ * Accumulate income and expenses from transactions and income entries into
+ * period buckets keyed by an arbitrary string produced by `periodKey`.
+ * Items that do not pass the respective filter predicate are skipped.
+ */
+function accumulateByPeriod(
+  transactions: Transaction[],
+  incomeEntries: IncomeEntry[],
+  periodKey: (date: Date) => string,
+  filterTx: (t: Transaction) => boolean,
+  filterIncome: (e: IncomeEntry) => boolean,
+): Map<string, PeriodBucket> {
+  const out = new Map<string, PeriodBucket>();
+
+  for (const t of transactions) {
+    if (!filterTx(t)) continue;
+    const key = periodKey(parseISO(t.date));
+    const bucket = out.get(key) ?? { income: 0, expenses: 0 };
+    bucket.expenses += Math.abs(t.amount);
+    out.set(key, bucket);
+  }
+
+  for (const entry of incomeEntries) {
+    if (!filterIncome(entry)) continue;
+    const key = periodKey(parseISO(entry.date));
+    const bucket = out.get(key) ?? { income: 0, expenses: 0 };
+    bucket.income += entry.netAmount;
+    out.set(key, bucket);
+  }
+
+  return out;
+}
+
 export function filterByRange(
   transactions: Transaction[],
   range: CustomDateRange | null,
@@ -219,69 +256,57 @@ export function buildMonthlyBalance(
 ): MonthlyBalance[] {
   if (year === -1) {
     // All Time: one entry per (year, month) that has any activity.
-    // Key = `${year}-${paddedMonth}` so string sort is chronological.
-    const map = new Map<string, { year: number; month: number; income: number; expenses: number }>();
-    const keyOf = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`;
+    // Key = `${y}-${paddedMonth}` so string sort is chronological.
+    const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
 
-    transactions.forEach((t) => {
-      if (t.archived || t.type !== 'expense') return;
-      const d = parseISO(t.date);
-      const k = keyOf(d.getFullYear(), d.getMonth());
-      const cur = map.get(k) ?? { year: d.getFullYear(), month: d.getMonth(), income: 0, expenses: 0 };
-      cur.expenses += Math.abs(t.amount);
-      map.set(k, cur);
-    });
-
-    incomeEntries.forEach((entry) => {
-      const d = parseISO(entry.date);
-      const k = keyOf(d.getFullYear(), d.getMonth());
-      const cur = map.get(k) ?? { year: d.getFullYear(), month: d.getMonth(), income: 0, expenses: 0 };
-      cur.income += entry.netAmount;
-      map.set(k, cur);
-    });
+    const map = accumulateByPeriod(
+      transactions,
+      incomeEntries,
+      keyOf,
+      (t) => !t.archived && t.type === 'expense',
+      () => true,
+    );
 
     return [...map.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-      .map(([, v]) => ({
-        month: `${MONTH_NAMES_SHORT[v.month]} ${v.year}`,
-        monthIndex: v.month,
-        year: v.year,
-        income: v.income,
-        expenses: v.expenses,
-        surplus: v.income - v.expenses,
-      }));
+      .map(([key, bucket]) => {
+        const [y, m] = key.split('-').map(Number);
+        return {
+          month: `${MONTH_NAMES_SHORT[m]} ${y}`,
+          monthIndex: m,
+          year: y,
+          income: bucket.income,
+          expenses: bucket.expenses,
+          surplus: bucket.income - bucket.expenses,
+        };
+      });
   }
 
-  const expenseByMonth = new Array(12).fill(0);
-  const incomeByMonth = new Array(12).fill(0);
-
-  transactions.forEach((t) => {
-    if (t.archived) return;
-    if (t.type !== 'expense') return;
-    const d = parseISO(t.date);
-    if (d.getFullYear() !== year) return;
-    expenseByMonth[d.getMonth()] += Math.abs(t.amount);
-  });
-
-  incomeEntries.forEach((entry) => {
-    const d = parseISO(entry.date);
-    if (d.getFullYear() !== year) return;
-    incomeByMonth[d.getMonth()] += entry.netAmount;
+  // Specific year: accumulate into 12 monthly buckets keyed by month index.
+  const map = accumulateByPeriod(
+    transactions,
+    incomeEntries,
+    (d) => String(d.getMonth()),
+    (t) => !t.archived && t.type === 'expense' && parseISO(t.date).getFullYear() === year,
+    (e) => parseISO(e.date).getFullYear() === year,
     // Taxes are already tracked as separate transactions
-  });
+  );
 
   // Past years show all 12 months; current year truncates at the current month.
   const currentYear = new Date().getFullYear();
   const monthCount = year < currentYear ? 12 : new Date().getMonth() + 1;
 
-  return MONTH_NAMES_SHORT.slice(0, monthCount).map((month, i) => ({
-    month,
-    monthIndex: i,
-    year,
-    income: incomeByMonth[i],
-    expenses: expenseByMonth[i],
-    surplus: incomeByMonth[i] - expenseByMonth[i],
-  }));
+  return MONTH_NAMES_SHORT.slice(0, monthCount).map((month, i) => {
+    const bucket = map.get(String(i)) ?? { income: 0, expenses: 0 };
+    return {
+      month,
+      monthIndex: i,
+      year,
+      income: bucket.income,
+      expenses: bucket.expenses,
+      surplus: bucket.income - bucket.expenses,
+    };
+  });
 }
 
 // ─── Per-Month Drill-Down ────────────────────────────────────────────────────

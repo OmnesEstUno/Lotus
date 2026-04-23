@@ -1,5 +1,9 @@
 import { format, startOfWeek, startOfMonth, subDays, subMonths, parseISO, isWithinInterval } from 'date-fns';
 import { Category, CustomDateRange, IncomeEntry, TimeRange, Transaction } from '../types';
+import { MONTH_NAMES_SHORT } from './dateConstants';
+
+/** @deprecated Import MONTH_NAMES_SHORT from utils/dateConstants instead. */
+export const MONTH_NAMES = MONTH_NAMES_SHORT;
 
 export function filterByRange(
   transactions: Transaction[],
@@ -24,8 +28,6 @@ export function getTrendingCategories(transactions: Transaction[]): Category[] {
   }
   return [...set].sort();
 }
-
-export const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 // ─── Time Range Helpers ──────────────────────────────────────────────────────
 
@@ -244,7 +246,7 @@ export function buildMonthlyBalance(
     return [...map.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
       .map(([, v]) => ({
-        month: `${MONTH_NAMES[v.month]} ${v.year}`,
+        month: `${MONTH_NAMES_SHORT[v.month]} ${v.year}`,
         monthIndex: v.month,
         year: v.year,
         income: v.income,
@@ -275,7 +277,7 @@ export function buildMonthlyBalance(
   const currentYear = new Date().getFullYear();
   const monthCount = year < currentYear ? 12 : new Date().getMonth() + 1;
 
-  return MONTH_NAMES.slice(0, monthCount).map((month, i) => ({
+  return MONTH_NAMES_SHORT.slice(0, monthCount).map((month, i) => ({
     month,
     monthIndex: i,
     year,

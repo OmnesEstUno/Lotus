@@ -133,7 +133,7 @@ function ExpandedMonthView({
           <ResponsiveContainer width="100%" height={280}>
             <BarChart
               data={dailyBalance}
-              margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
+              margin={{ top: 4, right: 16, left: 8, bottom: 28 }}
               onClick={(state: unknown) => {
                 const s = state as { activeLabel?: string } | null;
                 if (!s?.activeLabel) return;
@@ -166,7 +166,15 @@ function ExpandedMonthView({
                 labelFormatter={(label: string) => `${MONTH_NAMES[month]} ${label}`}
                 formatter={(value: number, name: string) => [formatCurrency(value), name]}
               />
-              <Legend wrapperStyle={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }} />
+              <Legend
+                align="center"
+                verticalAlign="bottom"
+                wrapperStyle={{
+                  fontSize: '0.8125rem',
+                  color: 'var(--text-secondary)',
+                  paddingTop: 12,
+                }}
+              />
               <Bar dataKey="income" name="Income" fill={INCOME_COLOR} radius={[3, 3, 0, 0]}>
                 {dailyBalance.map((d) => (
                   <Cell

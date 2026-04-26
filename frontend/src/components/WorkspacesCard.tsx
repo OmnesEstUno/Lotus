@@ -11,6 +11,7 @@ import {
   deleteWorkspaceInvite,
   WorkspaceInviteSummary,
 } from '../api/client';
+import { UNIX_MS_MULTIPLIER } from '../utils/constants';
 
 function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
   const [invites, setInvites] = useState<WorkspaceInviteSummary[]>([]);
@@ -97,7 +98,7 @@ function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
               <li key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: '0.8125rem' }}>
                 <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{inv.id.slice(0, 8)}…</span>
                 <span style={{ color: 'var(--text-muted)', flex: 1 }}>
-                  expires {new Date(inv.expiresAt * 1000).toLocaleDateString()}
+                  expires {new Date(inv.expiresAt * UNIX_MS_MULTIPLIER).toLocaleDateString()}
                 </span>
                 {inv.usedBy
                   ? <span style={{ color: 'var(--success)', flexShrink: 0 }}>claimed by {inv.usedBy}</span>

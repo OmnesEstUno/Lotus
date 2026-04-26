@@ -4,7 +4,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { getWorkspaceInviteMeta, acceptWorkspaceInvite } from '../api/client';
 import Logo from '../components/Logo';
-import { STORAGE_KEYS } from '../utils/constants';
+import { STORAGE_KEYS, UNIX_MS_MULTIPLIER } from '../utils/constants';
 
 interface InviteMeta {
   instanceName: string;
@@ -131,7 +131,7 @@ export default function WorkspaceInvitePage() {
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                 <span>Owner: <strong style={{ color: 'var(--text-primary)' }}>{meta.ownerUsername}</strong></span>
-                <span>Expires: {new Date(meta.expiresAt * 1000).toLocaleDateString()}</span>
+                <span>Expires: {new Date(meta.expiresAt * UNIX_MS_MULTIPLIER).toLocaleDateString()}</span>
               </div>
             </div>
 

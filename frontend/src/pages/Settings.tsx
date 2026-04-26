@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getTransactions, getIncome, renameCategory, deleteCategory, ConflictError } from '../api/client';
+import { getTransactions, getIncome, getUserCategories, renameCategory, deleteCategory, ConflictError } from '../api/client';
 import { IncomeEntry, Transaction } from '../types';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categories';
@@ -165,10 +165,10 @@ export default function Settings() {
           mappings: prev.mappings.map((m) => (m.category === from ? { ...m, category: newName } : m)),
         };
       });
-      await refreshTransactions();
+      await Promise.all([refreshTransactions(), getUserCategories()]);
     } catch (err) {
       if (err instanceof ConflictError) {
-        await refreshTransactions();
+        await Promise.all([refreshTransactions(), getUserCategories()]);
         setStatus({ kind: 'error', text: 'Data was changed by another tab — please retry the rename.' });
       } else {
         setStatus({ kind: 'error', text: (err as Error).message });
@@ -202,10 +202,10 @@ export default function Settings() {
         customCategories: prev.customCategories.filter((c) => c !== name),
         mappings: prev.mappings.filter((m) => m.category !== name),
       }));
-      await refreshTransactions();
+      await Promise.all([refreshTransactions(), getUserCategories()]);
     } catch (err) {
       if (err instanceof ConflictError) {
-        await refreshTransactions();
+        await Promise.all([refreshTransactions(), getUserCategories()]);
         setStatus({ kind: 'error', text: 'Data was changed by another tab — please retry the deletion.' });
       } else {
         setStatus({ kind: 'error', text: (err as Error).message });

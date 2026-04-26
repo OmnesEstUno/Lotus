@@ -112,9 +112,19 @@ async function authenticate(request: Request, env: Env): Promise<AuthContext | n
   }
 }
 
-async function authenticateAdmin(request: Request, env: Env, cors: Record<string, string>): Promise<AuthContext | Response> {
+async function requireAuth(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<AuthContext | Response> {
   const auth = await authenticate(request, env);
   if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+  return auth;
+}
+
+async function authenticateAdmin(request: Request, env: Env, cors: Record<string, string>): Promise<AuthContext | Response> {
+  const auth = await requireAuth(request, env, cors);
+  if (auth instanceof Response) return auth;
   if (auth.username !== 'admin') return respond({ error: 'Forbidden' }, 403, cors);
   return auth;
 }
@@ -125,8 +135,8 @@ async function authenticateInstanceOwner(
   instanceId: string,
   cors: Record<string, string>,
 ): Promise<{ auth: AuthContext; inst: Instance } | Response> {
-  const auth = await authenticate(request, env);
-  if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+  const auth = await requireAuth(request, env, cors);
+  if (auth instanceof Response) return auth;
   const raw = await env.FINANCE_KV.get(instanceMetaKey(instanceId));
   if (!raw) return respond({ error: 'Not found.' }, 404, cors);
   const inst = JSON.parse(raw) as Instance;
@@ -548,8 +558,8 @@ export default {
       // ─────────────────────────────────────────────────────────────────────
       // Protected routes — require valid JWT
       // ─────────────────────────────────────────────────────────────────────
-      const auth = await authenticate(request, env);
-      if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+      const auth = await requireAuth(request, env, cors);
+      if (auth instanceof Response) return auth;
 
       const { username } = auth;
 

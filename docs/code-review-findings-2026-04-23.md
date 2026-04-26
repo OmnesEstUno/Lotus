@@ -55,10 +55,32 @@ Commented-out code sweep: 415 non-TODO/NOTE/FIXME comment lines audited. All are
 - `frontend/src/components/dashboard/TimeRangeSelector.tsx`: removed dead `export { TIME_RANGE_LABELS }` (internal-only)
 
 ### Duplication
-(Populated in Phases 2–3.)
+
+**Phase 2 — frontend duplication:**
+
+- `frontend/src/utils/dateConstants.ts` — new module exporting `MONTH_NAMES_SHORT` (and a `MonthIndex` type). The previously duplicated month-name array in `dataProcessing.ts` (`MONTH_NAMES`) and `DateRangePicker.tsx` (`MONTH_LABELS`) were removed. Three additional consumers (`Dashboard.tsx`, `ExpandedMonthView.tsx`, `ExpenseCategoryTable.tsx`) were migrated; the bridging deprecated re-export was deleted.
+- `frontend/src/utils/dataProcessing.ts` — the two parallel branches of `buildMonthlyBalance` (year === -1 all-time and specific-year) shared near-identical accumulation loops over transactions and income entries. Extracted as a private `accumulateByPeriod(transactions, incomeEntries, periodKey, filterTx, filterIncome): Map<string, PeriodBucket>` helper at the top of the module. Both branches now call it with appropriate callbacks. Behavior preserved (verified by tracing). Date is parsed once per item (no double-parse regression).
+
+**Phase 3 — worker duplication:**
+
+- `worker/src/invite-primitives.ts` — new module containing the previously-duplicated crypto/encoding helpers (`hmacSign`, `b64urlEncode*`, `deriveDomainKey`, `getDomainKeyCached`, `encodeToken`, `decodeAndVerifyToken`, `readInviteRecord`, `markUsed`, `InviteCommon`). Adds a constant-time signature comparison (an upgrade over the prior plain `!==`).
+- `worker/src/invites.ts` — rewritten on top of `invite-primitives`. Dropped from 107 to 51 lines.
+- `worker/src/workspace-invites.ts` — rewritten on top of `invite-primitives`. Dropped from 121 to 68 lines.
+- `worker/src/index.ts` — extracted private `requireAuth(request, env, cors)` helper that wraps `authenticate` + 401-on-null. Both `authenticateAdmin` and `authenticateInstanceOwner` now call it; one additional inline duplicate in the route handlers was also migrated.
 
 ### Security
-(Populated in Phase 5.)
+
+**Phase 5 — hardening pass.**
+
+| Task | What changed | File(s) |
+|---|---|---|
+| 5.1 | Default security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Strict-Transport-Security: max-age=31536000; includeSubDomains`. Implemented in the central `respond()` helper so every endpoint inherits. | `worker/src/index.ts` |
+| 5.2 | CORS no longer falls back to `*` when no origin matches. The previous fallback returned the production `ALLOWED_ORIGIN` to ANY mismatched origin (an additional bug); both behaviors are removed. New behavior: empty `Access-Control-Allow-Origin` when origin doesn't match localhost or `ALLOWED_ORIGIN`. Added `Vary: Origin` header. Added `X-Instance-Id` to the allow-headers list. | `worker/src/index.ts` |
+| 5.3 | Rate-limiting: per-username on `/api/auth/login` (5 attempts / 15 min lockout) and per-preauth-id on `/api/auth/verify-2fa` (5 attempts / 60 sec lockout). KV-backed via `checkAndIncrement` helper. Counter clears on successful auth. Note: KV is eventually consistent — documented as an acceptable limitation for serial brute-force traffic. | `worker/src/index.ts` + `worker/src/constants.ts` |
+| 5.4 | Setup flow `init→confirm` now requires a short-lived (90-second) one-shot token. Issued in `/api/setup/init` response, required in `/api/setup/confirm` body, deleted on success. Frontend (`Login.tsx`, `api/client.ts`) updated to plumb the token end-to-end. | `worker/src/index.ts`, `frontend/src/pages/Login.tsx`, `frontend/src/api/client.ts` |
+| 5.5 | PBKDF2 iterations bumped 100k → 600k (OWASP 2023+ guidance). Backward-compat: stored hashes prefixed with literal `pbkdf2:` are detected as legacy 100k; new hashes use `${iterations}:${salt}:${hash}` format. Both forms verify correctly. TOTP window narrowed from `[-1, 0, +1]` (90s) to `[-1, 0]` (60s). Combined with rate limiting from 5.3, brute force becomes infeasible. | `worker/src/crypto.ts` |
+| 5.6 | Invite-metadata leak audit: response was already correctly omitting the full `members` array (just sending `alreadyMember: boolean`). Documented the design intent with a code comment to guard against future regressions. | `worker/src/index.ts` |
+| 5.7 | JSON body size caps on batch endpoints. `MAX_BATCH_SIZE = 1000` for content-bearing arrays; `MAX_BULK_IDS = 10,000` for ID-only arrays. Returns HTTP 413 when exceeded. Capped fields: `body.transactions` (POST /api/transactions), `body.customCategories` and `body.mappings` (PUT /api/user-categories), `body.transactionIds` and `body.incomeIds` (POST /api/bulk-delete). | `worker/src/index.ts` |
 
 ### Concurrency / Data Integrity
 (Populated in Phase 6.)

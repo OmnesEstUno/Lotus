@@ -70,17 +70,22 @@ export async function upsertInYear<T extends { id: string; date: string }>(
 ): Promise<void> {
   const y = yearOfISODate(item.date);
   const key = `${prefix}:${y}`;
-  const raw = await kv.get(key);
-  const arr = raw ? (JSON.parse(raw) as T[]) : [];
-  const idx = arr.findIndex((x) => x.id === item.id);
-  if (idx >= 0) arr[idx] = item; else arr.push(item);
-  await kv.put(key, JSON.stringify(arr));
+  // 1. Make sure the year is in the index FIRST (creates an "optimistic" entry).
+  //    If the shard write below fails, the index points at an empty location;
+  //    readers treat missing shards as [].
   const indexRaw = await kv.get(`${prefix}:index`);
   const { years } = indexRaw ? (JSON.parse(indexRaw) as YearIndex) : { years: [] as number[] };
   if (!years.includes(y)) {
     years.push(y); years.sort((a, b) => a - b);
     await kv.put(`${prefix}:index`, JSON.stringify({ years }));
   }
+
+  // 2. Now write the shard.
+  const raw = await kv.get(key);
+  const arr = raw ? (JSON.parse(raw) as T[]) : [];
+  const idx = arr.findIndex((x) => x.id === item.id);
+  if (idx >= 0) arr[idx] = item; else arr.push(item);
+  await kv.put(key, JSON.stringify(arr));
 }
 
 export async function deleteFromAnyYear<T extends { id: string }>(

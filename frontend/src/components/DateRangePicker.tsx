@@ -3,6 +3,7 @@ import DatePicker from 'react-datepicker';
 import { format, parseISO } from 'date-fns';
 import { CustomDateRange } from '../types';
 import { MONTH_NAMES_SHORT } from '../utils/dateConstants';
+import { YEAR_LOOKBACK, YEAR_LOOKFORWARD } from '../utils/constants';
 
 interface DateRangePickerProps {
   value: CustomDateRange | null;
@@ -37,8 +38,8 @@ function CustomHeader({
   const viewedYear = date.getFullYear();
   const viewedMonth = date.getMonth();
 
-  const minYear = min ? min.getFullYear() : viewedYear - 10;
-  const maxYear = max ? max.getFullYear() : viewedYear + 10;
+  const minYear = min ? min.getFullYear() : viewedYear - YEAR_LOOKBACK;
+  const maxYear = max ? max.getFullYear() : viewedYear + YEAR_LOOKFORWARD;
   const years: number[] = [];
   for (let y = minYear; y <= maxYear; y++) years.push(y);
 

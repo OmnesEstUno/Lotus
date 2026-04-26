@@ -57,7 +57,7 @@ import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CardId } from '../hooks/useDashboardLayout';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
-import { TOUCH_SENSOR_DELAY_MS, TOUCH_SENSOR_TOLERANCE_PX } from '../utils/constants';
+import { TOUCH_SENSOR_DELAY_MS, TOUCH_SENSOR_TOLERANCE_PX, YEAR_LOOKBACK } from '../utils/constants';
 
 // Undo-toast payload: what was just deleted, so we can restore it if the
 // user clicks Undo before the timeout fires.
@@ -408,7 +408,7 @@ export default function Dashboard() {
           >
             {expenseRange && (() => {
               const today = new Date();
-              const tenYearsAgo = new Date(today.getFullYear() - 10, today.getMonth(), today.getDate());
+              const tenYearsAgo = new Date(today.getFullYear() - YEAR_LOOKBACK, today.getMonth(), today.getDate());
               const oldest = transactions.filter((t) => !t.archived).map((t) => t.date).sort()[0];
               const tenYrStr = tenYearsAgo.toISOString().slice(0, 10);
               const minDate = oldest && oldest > tenYrStr ? oldest : tenYrStr;
@@ -550,7 +550,7 @@ export default function Dashboard() {
           >
             {avgRange && (() => {
               const today = new Date();
-              const tenYearsAgo = new Date(today.getFullYear() - 10, today.getMonth(), today.getDate());
+              const tenYearsAgo = new Date(today.getFullYear() - YEAR_LOOKBACK, today.getMonth(), today.getDate());
               const oldest = transactions.filter((t) => !t.archived).map((t) => t.date).sort()[0];
               const tenYrStr = tenYearsAgo.toISOString().slice(0, 10);
               const minDate = oldest && oldest > tenYrStr ? oldest : tenYrStr;

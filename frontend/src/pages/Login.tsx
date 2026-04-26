@@ -12,7 +12,7 @@ import {
 } from '../api/client';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
-import { STORAGE_KEYS } from '../utils/constants';
+import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
 
 type Step =
   | 'loading'
@@ -95,7 +95,7 @@ export default function Login() {
     e.preventDefault();
     setError('');
     const trimmedUsername = username.trim().toLowerCase();
-    if (!/^[a-z0-9_-]{3,32}$/.test(trimmedUsername)) {
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
       setError('Username must be 3–32 characters: lowercase letters, digits, underscore, or dash.');
       return;
     }
@@ -123,11 +123,11 @@ export default function Login() {
     e.preventDefault();
     setError('');
     const trimmedUsername = username.trim().toLowerCase();
-    if (!/^[a-z0-9_-]{3,32}$/.test(trimmedUsername)) {
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
       setError('Username must be 3–32 characters: lowercase letters, digits, underscore, or dash.');
       return;
     }
-    if (password.length < 8) {
+    if (password.length < PASSWORD_MIN_LENGTH) {
       setError('Your password must be at least 8 characters long.');
       return;
     }
@@ -327,7 +327,7 @@ export default function Login() {
                 required
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                3–32 characters: lowercase letters, digits, underscore, or dash.
+                {USERNAME_HINT}
               </p>
             </div>
             <div className="form-group">
@@ -377,7 +377,7 @@ export default function Login() {
                 required
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                3–32 characters: lowercase letters, digits, underscore, or dash.
+                {USERNAME_HINT}
               </p>
             </div>
             <div className="form-group">
@@ -388,7 +388,7 @@ export default function Login() {
                 placeholder="Min. 8 characters"
                 autoComplete="new-password"
                 required
-                minLength={8}
+                minLength={PASSWORD_MIN_LENGTH}
               />
             </div>
             <div className="form-group">

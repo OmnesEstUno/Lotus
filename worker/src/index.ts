@@ -72,16 +72,13 @@ interface UserProfile {
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
 function corsHeaders(origin: string | null, allowedOrigin: string): Record<string, string> {
-  // Allow localhost for dev (any port) + the configured production origin
-  const isLocalhost = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  const matchesAllowed = origin && allowedOrigin && origin === allowedOrigin;
+  // Allow localhost for dev (any port) + the configured production origin.
+  // Default to empty string (not '*') so browsers reject unrecognised origins.
+  const isLocalhost = !!origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  const matchesAllowed = !!origin && !!allowedOrigin && origin === allowedOrigin;
 
-  let allowOrigin = '*';
-  if (isLocalhost || matchesAllowed) {
-    allowOrigin = origin!;
-  } else if (allowedOrigin) {
-    allowOrigin = allowedOrigin;
-  }
+  let allowOrigin = '';
+  if (isLocalhost || matchesAllowed) allowOrigin = origin!;
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
@@ -282,7 +279,7 @@ export default {
     const path = url.pathname;
     const method = request.method;
     const origin = request.headers.get('Origin');
-    const cors = corsHeaders(origin, env.ALLOWED_ORIGIN ?? '*');
+    const cors = corsHeaders(origin, env.ALLOWED_ORIGIN ?? '');
 
     // CORS preflight
     if (method === 'OPTIONS') {

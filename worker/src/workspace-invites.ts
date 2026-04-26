@@ -2,6 +2,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import {
   InviteCommon, encodeToken, decodeAndVerifyToken, readInviteRecord, markUsed, hmacSign, getDomainKeyCached, b64urlEncodeStr,
 } from './invite-primitives';
+import { WORKSPACE_INVITE_TTL_SECONDS } from './constants';
 
 export interface WorkspaceInviteRecord extends InviteCommon {
   instanceId: string;
@@ -9,7 +10,7 @@ export interface WorkspaceInviteRecord extends InviteCommon {
 }
 
 const PURPOSE = 'workspace-invite-v1';
-const TTL_SECONDS = 7 * 24 * 60 * 60;
+const TTL_SECONDS = WORKSPACE_INVITE_TTL_SECONDS;
 const kvKey = (id: string) => `workspace-invites:${id}`;
 
 export async function createWorkspaceInvite(

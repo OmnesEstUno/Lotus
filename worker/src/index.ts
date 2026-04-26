@@ -35,6 +35,7 @@ import {
   deleteFromAnyYear,
   yearOfISODate,
 } from './paginated';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES } from './constants';
 
 export interface Env {
   FINANCE_KV: KVNamespace;
@@ -161,10 +162,10 @@ async function addUsername(kv: KVNamespace, username: string): Promise<void> {
 // ─── KV key scoping ───────────────────────────────────────────────────────────
 
 const userKey = (username: string, leaf: 'profile' | 'data:transactions' | 'data:income' | 'data:userCategories') =>
-  `users:${username}:${leaf}`;
+  KV_PREFIXES.USER(username, leaf);
 
 const instanceKey = (instanceId: string, leaf: 'data:transactions' | 'data:income' | 'data:userCategories') =>
-  `instances:${instanceId}:${leaf}`;
+  KV_PREFIXES.INSTANCE_DATA(instanceId, leaf);
 
 // ─── User profile helpers ─────────────────────────────────────────────────────
 
@@ -482,11 +483,11 @@ export default {
 
         const preAuthId = crypto.randomUUID();
         const preAuthToken = await signJWT(
-          { preAuth: true, id: preAuthId, username, exp: Math.floor(Date.now() / 1000) + 300 },
+          { preAuth: true, id: preAuthId, username, exp: Math.floor(Date.now() / 1000) + PREAUTH_TTL_SECONDS },
           env.JWT_SECRET,
         );
 
-        await env.FINANCE_KV.put(`preauth:${preAuthId}`, username, { expirationTtl: 300 });
+        await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), username, { expirationTtl: PREAUTH_TTL_SECONDS });
         return respond({ preAuthToken }, 200, cors);
       }
 
@@ -509,7 +510,7 @@ export default {
         }
 
         const username = payload.username;
-        const stored = await env.FINANCE_KV.get(`preauth:${payload.id}`);
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PREAUTH(payload.id));
         if (stored !== username) return respond({ error: 'Session expired.' }, 401, cors);
 
         const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
@@ -519,10 +520,10 @@ export default {
         const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
         if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
 
-        await env.FINANCE_KV.delete(`preauth:${payload.id}`);
+        await env.FINANCE_KV.delete(KV_PREFIXES.PREAUTH(payload.id));
 
         const token = await signJWT(
-          { authenticated: true, username, exp: Math.floor(Date.now() / 1000) + 86400 * 7 },
+          { authenticated: true, username, exp: Math.floor(Date.now() / 1000) + JWT_TTL_SECONDS },
           env.JWT_SECRET,
         );
 

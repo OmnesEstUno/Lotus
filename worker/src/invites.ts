@@ -2,11 +2,11 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import {
   InviteCommon, encodeToken, decodeAndVerifyToken, readInviteRecord, markUsed, hmacSign, getDomainKeyCached, b64urlEncodeStr,
 } from './invite-primitives';
+import { INVITE_TTL_SECONDS } from './constants';
 
 export interface InviteRecord extends InviteCommon {}
 
 const PURPOSE = 'invite-token-v1';
-const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const kvKey = (id: string) => `invites:${id}`;
 
 export async function createInvite(kv: KVNamespace, jwtSecret: string): Promise<{ id: string; token: string; expiresAt: number }> {

@@ -35,7 +35,7 @@ import {
   deleteFromAnyYear,
   yearOfISODate,
 } from './paginated';
-import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS } from './constants';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS } from './constants';
 
 export interface Env {
   FINANCE_KV: KVNamespace;
@@ -804,6 +804,7 @@ export default {
         const instRaw = await env.FINANCE_KV.get(instanceMetaKey(record.instanceId));
         if (!instRaw) return respond({ error: 'Workspace no longer exists.' }, 404, cors);
         const inst = JSON.parse(instRaw) as Instance;
+        // Members array intentionally omitted to prevent membership-roster leak via invite token.
         return respond({
           instanceName: inst.name,
           ownerUsername: inst.owner,

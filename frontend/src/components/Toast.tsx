@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TOAST_DEFAULT_DURATION_MS, TOAST_TICK_INTERVAL_MS } from '../utils/constants';
 
 interface ToastProps {
@@ -24,6 +24,17 @@ export default function Toast({
 }: ToastProps) {
   const [remaining, setRemaining] = useState(100);
 
+  // Keep a stable ref to onDismiss so the interval effect doesn't need it in
+  // its dep array. Without this, a parent that creates a new onDismiss
+  // reference each render would restart the interval on every render.
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => { onDismissRef.current = onDismiss; }, [onDismiss]);
+
+  // Track mount state to skip calling onDismiss after the component unmounts,
+  // preventing "state update on unmounted component" React warnings.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   useEffect(() => {
     const startedAt = Date.now();
     const interval = window.setInterval(() => {
@@ -32,11 +43,12 @@ export default function Toast({
       setRemaining(pct);
       if (pct <= 0) {
         window.clearInterval(interval);
-        onDismiss();
+        if (!mountedRef.current) return;
+        onDismissRef.current();
       }
     }, TOAST_TICK_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [duration, onDismiss]);
+  }, [duration]); // onDismiss intentionally omitted — accessed via ref above
 
   return (
     <div

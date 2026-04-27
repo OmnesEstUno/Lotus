@@ -83,7 +83,48 @@ Commented-out code sweep: 415 non-TODO/NOTE/FIXME comment lines audited. All are
 | 5.7 | JSON body size caps on batch endpoints. `MAX_BATCH_SIZE = 1000` for content-bearing arrays; `MAX_BULK_IDS = 10,000` for ID-only arrays. Returns HTTP 413 when exceeded. Capped fields: `body.transactions` (POST /api/transactions), `body.customCategories` and `body.mappings` (PUT /api/user-categories), `body.transactionIds` and `body.incomeIds` (POST /api/bulk-delete). | `worker/src/index.ts` |
 
 ### Concurrency / Data Integrity
-(Populated in Phase 6.)
+
+**Phase 6 — optimistic concurrency + crash safety.**
+
+Background: prior to this work, several worker endpoints did read-modify-write on KV records without protection. Two browser tabs (or two devices) editing the same workspace could silently lose each other's edits.
+
+**6.1 — Versioning on per-instance data (transactions, income, user categories):**
+
+- Storage: added `version: number` to the `YearIndex` (in `worker/src/paginated.ts`) and to the user-categories KV record. Every write path (`upsertInYear`, `writeAllYears`, `deleteFromAnyYear`, `updateInAnyYear`, user-categories PUT/rename/delete) increments the version. Legacy records without a version default to 0.
+- Reads: `GET /api/transactions`, `GET /api/income`, `GET /api/user-categories` now include `version` in their response envelopes.
+- Writes: 11 write endpoints now require `expectedVersion` (or split `expectedTransactionsVersion`/`expectedIncomeVersion`/`expectedUserCategoriesVersion` for endpoints that touch multiple resources). Missing field → 400; stale field → 409 with `{ error: 'conflict', currentVersion }`. Endpoints covered:
+  - `POST /api/transactions` (add)
+  - `POST /api/income` (add)
+  - `PUT /api/user-categories`
+  - `POST /api/bulk-delete` (conditional version per non-empty array)
+  - `POST /api/transactions/bulk-update-category`
+  - `POST /api/rename-category` (dual: transactions + user-categories)
+  - `POST /api/delete-category` (dual)
+  - `PUT /api/transactions/:id` (single record)
+  - `DELETE /api/transactions/:id`
+  - `PUT /api/income/:id`
+  - `DELETE /api/income/:id`
+- Frontend: a module-private `resourceVersions` map in `frontend/src/api/client.ts` is populated by every read function and consumed by every mutation function. A `ConflictError` class extends `Error` with a `currentVersion` field and is thrown by the `request()` helper on 409. `Dashboard.tsx`, `Settings.tsx`, and `DataEntry.tsx` catch `ConflictError`, refetch fresh data, and surface a "Data was changed elsewhere — please retry" message.
+- The `useUserCategories` auto-save hook performs an automatic single retry on conflict (since auto-save is a fire-and-forget side effect, the user shouldn't see it fail).
+- Endpoints intentionally exempt: `POST /api/purge-all` (destructive wipe by design, behind explicit confirm flag).
+
+**6.2 — Versioning on workspace (instance) metadata:**
+
+- Storage: `version: number` added to the `Instance` record. Read paths default missing → 0; writes increment.
+- Read: `GET /api/instances` now returns `version` per instance; frontend stashes via `resourceVersions.set('instance:<id>', v)`.
+- Writes gated: `PUT /api/instances/:id` (rename) and `DELETE /api/instances/:id/members/:u` (remove member). Both 409 on mismatch.
+- Exemptions (documented in code): `POST /api/instances` (new resource), `DELETE /api/instances/:id` (owner-only delete; double-click race returns 404), `POST /api/instances/invites/accept` (invite token is the authorization, and the "already a member" guard prevents duplicate-accept).
+- UI: `WorkspacesCard.tsx` handlers catch `ConflictError` and show a refresh-and-retry message.
+
+**6.3 — Crash-safety on paginated index:**
+
+- `worker/src/paginated.ts` `upsertInYear` now writes the year-index BEFORE the shard. If a partial failure occurs, the index is a superset (a phantom year with no shard), and the read path already tolerates missing shards as `[]`. Previously, a crash between writes could leave an orphaned shard not referenced from the index — silently invisible data.
+- `writeAllYears` (full bulk rewrite) was NOT changed; it does a parallel multi-write where the ordering question is genuinely ambiguous. Documented as out-of-scope for this task.
+
+**Known limitations:**
+
+- Cloudflare KV is eventually consistent; two concurrent requests at the same edge POP can both read the pre-increment count. For brute-force or two-tab traffic that serializes through one POP, the version mechanism still works. Documented as an acceptable limitation.
+- Partial deploys (frontend updated, worker not yet) cause writes to send `expectedVersion` that the old worker ignores. Reverse (new worker, old frontend) means the new worker rejects writes with 400. The GitHub Actions workflow deploys both together, so this only affects manual partial deploys.
 
 ### Hard-coded Values
 

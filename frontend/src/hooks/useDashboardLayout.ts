@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { STORAGE_KEYS } from '../utils/constants';
+import { storage } from '../utils/storage';
 
 const CARD_IDS = [
   'spending-trends',
@@ -28,7 +29,7 @@ function reconcileOrder(saved: string[] | null): CardId[] {
 
 function readSet(key: string): Set<CardId> {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = storage.get(key);
     const parsed = raw ? (JSON.parse(raw) as string[]) : [];
     return new Set(parsed.filter((id): id is CardId => (CARD_IDS as readonly string[]).includes(id)));
   } catch {
@@ -45,7 +46,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
   useEffect(() => {
     if (!instanceId) return;
     try {
-      const raw = localStorage.getItem(STORAGE_KEYS.DASHBOARD_ORDER(instanceId));
+      const raw = storage.get(STORAGE_KEYS.DASHBOARD_ORDER(instanceId));
       setCardOrderState(reconcileOrder(raw ? (JSON.parse(raw) as string[]) : null));
     } catch {
       setCardOrderState([...CARD_IDS]);
@@ -63,7 +64,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
       setCardOrderState((prev) => {
         const next = typeof update === 'function' ? update(prev) : update;
         if (instanceId) {
-          localStorage.setItem(STORAGE_KEYS.DASHBOARD_ORDER(instanceId), JSON.stringify(next));
+          storage.set(STORAGE_KEYS.DASHBOARD_ORDER(instanceId), JSON.stringify(next));
         }
         return next;
       });
@@ -78,7 +79,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
         if (next.has(id)) next.delete(id);
         else next.add(id);
         if (instanceId) {
-          localStorage.setItem(STORAGE_KEYS.DASHBOARD_MINIMIZED(instanceId), JSON.stringify([...next]));
+          storage.set(STORAGE_KEYS.DASHBOARD_MINIMIZED(instanceId), JSON.stringify([...next]));
         }
         return next;
       });
@@ -93,7 +94,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
         if (next.has(id)) next.delete(id);
         else next.add(id);
         if (instanceId) {
-          localStorage.setItem(STORAGE_KEYS.HIDDEN(instanceId), JSON.stringify([...next]));
+          storage.set(STORAGE_KEYS.HIDDEN(instanceId), JSON.stringify([...next]));
         }
         return next;
       });

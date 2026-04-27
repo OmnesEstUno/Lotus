@@ -1,5 +1,6 @@
 import { IncomeEntry, Instance, Transaction, UserCategories } from '../types';
 import { STORAGE_KEYS } from '../utils/constants';
+import { storage } from '../utils/storage';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
@@ -45,12 +46,12 @@ export function subscribeActiveInstance(fn: (id: string | null) => void): () => 
 }
 
 export function getActiveInstanceId(): string | null {
-  return localStorage.getItem(STORAGE_KEYS.ACTIVE_INSTANCE);
+  return storage.get(STORAGE_KEYS.ACTIVE_INSTANCE);
 }
 
 export function setActiveInstanceIdLocal(id: string | null): void {
-  if (id) localStorage.setItem(STORAGE_KEYS.ACTIVE_INSTANCE, id);
-  else localStorage.removeItem(STORAGE_KEYS.ACTIVE_INSTANCE);
+  if (id) storage.set(STORAGE_KEYS.ACTIVE_INSTANCE, id);
+  else storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);
   notifyActiveInstanceChange(id);
 }
 
@@ -70,19 +71,19 @@ export function subscribeUsername(fn: (u: string | null) => void): () => void {
 // ─── Token helpers ────────────────────────────────────────────────────────────
 
 function getToken(): string | null {
-  return localStorage.getItem(STORAGE_KEYS.TOKEN);
+  return storage.get(STORAGE_KEYS.TOKEN);
 }
 
 function setToken(token: string): void {
-  localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+  storage.set(STORAGE_KEYS.TOKEN, token);
 }
 
 function clearToken(): void {
-  localStorage.removeItem(STORAGE_KEYS.TOKEN);
+  storage.remove(STORAGE_KEYS.TOKEN);
 }
 
 export function getCurrentUsername(): string | null {
-  return localStorage.getItem(STORAGE_KEYS.USERNAME);
+  return storage.get(STORAGE_KEYS.USERNAME);
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -102,9 +103,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (res.status === 401) {
     clearToken();
-    localStorage.removeItem(STORAGE_KEYS.USERNAME);
+    storage.remove(STORAGE_KEYS.USERNAME);
     notifyUsernameChange(null);
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_INSTANCE);
+    storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);
     notifyActiveInstanceChange(null);
     window.location.hash = '#/login';
     throw new Error('Session expired. Please log in again.');
@@ -158,7 +159,7 @@ export async function verify2FA(preAuthToken: string, totpCode: string): Promise
     body: JSON.stringify({ preAuthToken, totpCode }),
   });
   setToken(result.token);
-  localStorage.setItem(STORAGE_KEYS.USERNAME, result.username);
+  storage.set(STORAGE_KEYS.USERNAME, result.username);
   notifyUsernameChange(result.username);
   return result;
 }
@@ -168,9 +169,9 @@ export async function logout(): Promise<void> {
     await request('/api/auth/logout', { method: 'POST' });
   } finally {
     clearToken();
-    localStorage.removeItem(STORAGE_KEYS.USERNAME);
+    storage.remove(STORAGE_KEYS.USERNAME);
     notifyUsernameChange(null);
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_INSTANCE);
+    storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);
     notifyActiveInstanceChange(null);
   }
 }

@@ -13,6 +13,7 @@ import {
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
 import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
+import { sessionStore } from '../utils/storage';
 
 type Step =
   | 'loading'
@@ -203,9 +204,9 @@ export default function Login() {
     setLoading(true);
     try {
       await verify2FA(preAuthToken, totpCode);
-      const pending = sessionStorage.getItem(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
+      const pending = sessionStore.get(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
       if (pending) {
-        sessionStorage.removeItem(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
+        sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
         window.location.hash = `#/workspace-invite?token=${encodeURIComponent(pending)}`;
         return;
       }

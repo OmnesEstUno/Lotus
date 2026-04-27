@@ -190,7 +190,24 @@ Not replaced: `transition: 'width 50ms linear'` in `Toast.tsx` — this is a CSS
 Note: The error message strings `'Username must be 3–32 characters...'` were NOT replaced with `USERNAME_HINT` because they contain additional prose (`'Username must be '` prefix) and do not match the constant's value verbatim.
 
 ### CSS / Responsive Units
-(Populated in Phases 7–9.)
+
+**Phase 7 — design tokens.** Added spacing scale (`--space-0` through `--space-12`), typography scale (`--font-size-xs` through `--font-size-3xl` plus weights), z-index layer scale (`--z-base` through `--z-tooltip`), and touch-target tokens (`--touch-target-min: 44px`, `--touch-target-compact: 40px`). Bumped base font-size from 14px → 16px (conventional rem math). Migrated existing CSS rules in `frontend/src/index.css`:
+- 3 z-index values mapped to layer tokens (`.navbar`, `.modal-backdrop`, `.fab-enter-data`); 5 left as literals (intra-table stacking 1/2/3, datepicker popper at 300).
+- ~51 padding/margin/gap values migrated to spacing tokens. Hairlines (1-2px borders/dividers) kept as literals. Drop-zone uses `clamp(var(--space-6), 5vw, var(--space-10))` per Phase 9 prep.
+- 22 font-sizes + 18 font-weights migrated to typography tokens. Non-standard sizes (0.8125rem, 0.95rem, etc.) and the 11px recharts axis label kept as literals.
+
+**Phase 9 — responsive layout.**
+- **9.1 Mobile-first breakpoints + fluid padding:** Sidebar (`.workspace-tabs`) flipped to mobile-first — hidden by default, shown via `@media (min-width: 640px)`. `.container` padding now `clamp(var(--space-3), 4vw, var(--space-6))`. `.modal-card` `max-width: min(90vw, 900px)` so it never overflows mobile screens. `.modal-card` and `.modal-backdrop` padding uses `clamp()` for fluid scaling.
+- **9.2 Touch-target minimums:** `.btn`, `.btn-sm`, `.nav-link`, `.tab` all now meet 44px (or 40px compact). Drag handles, modal close button, and toggle-switch tap zones expanded to 44x44 (visual icon size preserved via explicit height/width on inner elements). `.dashboard-card-handle` got 44px hit area with `padding: var(--space-1)`.
+- **9.3 Fluid typography:** `h1` uses `clamp(var(--font-size-2xl), 4vw, var(--font-size-3xl))` — floors at 24px on phones, caps at 30px on desktop. `h2` similarly clamped. `h3` left at fixed 1rem.
+
+**Pixels intentionally retained:**
+- Hairline borders/dividers/scrollbars (1-3px) — pixel-perfect by design
+- Recharts axis labels (11px) — chart-library-internal
+- Material symbol icon at fixed 32px — sized to grid
+- Sidebar fixed width (150px) above 640px — desktop-only, not relative to font
+
+**Single-breakpoint legacy** (`@media (max-width: 640px)`): the original CSS had only one breakpoint. Phase 9 added the inverse `@media (min-width: 640px)` for mobile-first sidebar; the original max-width block remains for any rules still using the desktop-first model. Both coexist; future refactors can flip remaining rules incrementally.
 
 ### Inline Styles
 

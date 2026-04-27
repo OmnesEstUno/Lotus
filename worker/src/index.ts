@@ -984,6 +984,14 @@ export default {
           return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
         }
         const id = txnDeleteMatch[1];
+        const delBody = await request.json().catch(() => ({})) as { expectedVersion?: number };
+        if (typeof delBody.expectedVersion !== 'number') {
+          return respond({ error: 'expectedVersion required' }, 400, cors);
+        }
+        const { version: currentTxnDelVersion } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+        if (delBody.expectedVersion !== currentTxnDelVersion) {
+          return respond({ error: 'conflict', currentVersion: currentTxnDelVersion }, 409, cors);
+        }
         const ok = await deleteFromAnyYear<Transaction>(
           env.FINANCE_KV,
           instanceKey(instanceId, 'data:transactions'),
@@ -1004,7 +1012,15 @@ export default {
           amount?: number;
           notes?: string;
           archived?: boolean;
+          expectedVersion?: number;
         };
+        if (typeof body.expectedVersion !== 'number') {
+          return respond({ error: 'expectedVersion required' }, 400, cors);
+        }
+        const { version: currentTxnVersion } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedVersion !== currentTxnVersion) {
+          return respond({ error: 'conflict', currentVersion: currentTxnVersion }, 409, cors);
+        }
         // Build only the fields explicitly provided so updateInAnyYear merges correctly.
         const patch: Partial<Transaction> = {};
         if (typeof body.date === 'string' && body.date) patch.date = body.date;
@@ -1123,6 +1139,14 @@ export default {
           return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
         }
         const id = incDeleteMatch[1];
+        const delIncBody = await request.json().catch(() => ({})) as { expectedVersion?: number };
+        if (typeof delIncBody.expectedVersion !== 'number') {
+          return respond({ error: 'expectedVersion required' }, 400, cors);
+        }
+        const { version: currentIncDelVersion } = await getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId);
+        if (delIncBody.expectedVersion !== currentIncDelVersion) {
+          return respond({ error: 'conflict', currentVersion: currentIncDelVersion }, 409, cors);
+        }
         const ok = await deleteFromAnyYear<IncomeEntry>(
           env.FINANCE_KV,
           instanceKey(instanceId, 'data:income'),
@@ -1141,7 +1165,15 @@ export default {
           description?: string;
           grossAmount?: number;
           netAmount?: number;
+          expectedVersion?: number;
         };
+        if (typeof body.expectedVersion !== 'number') {
+          return respond({ error: 'expectedVersion required' }, 400, cors);
+        }
+        const { version: currentIncVersion } = await getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedVersion !== currentIncVersion) {
+          return respond({ error: 'conflict', currentVersion: currentIncVersion }, 409, cors);
+        }
         // Build only the fields explicitly provided so updateInAnyYear merges correctly.
         const patch: Partial<IncomeEntry> = {};
         if (typeof body.date === 'string' && body.date) patch.date = body.date;

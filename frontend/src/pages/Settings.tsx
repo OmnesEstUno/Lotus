@@ -151,11 +151,8 @@ export default function Settings() {
     setStatus(null);
     try {
       const result = await renameCategory(from, newName);
-      setStatus({
-        kind: 'success',
-        text: `Renamed "${from}" → "${newName}" (updated ${result.updated} transaction${result.updated !== 1 ? 's' : ''} and ${result.mappingsUpdated} mapping${result.mappingsUpdated !== 1 ? 's' : ''}).`,
-      });
-      // Optimistically update local custom-category list
+      // Update local state AFTER the API call succeeds to avoid racing the
+      // useUserCategories auto-save hook with the explicit mutation.
       setUserCategories((prev) => {
         const nextCustom = prev.customCategories.map((c) => (c === from ? newName : c));
         // De-dup case where `newName` already exists
@@ -165,10 +162,14 @@ export default function Settings() {
           mappings: prev.mappings.map((m) => (m.category === from ? { ...m, category: newName } : m)),
         };
       });
-      await Promise.all([refreshTransactions(), getUserCategories()]);
+      await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
+      setStatus({
+        kind: 'success',
+        text: `Renamed "${from}" → "${newName}" (updated ${result.updated} transaction${result.updated !== 1 ? 's' : ''} and ${result.mappingsUpdated} mapping${result.mappingsUpdated !== 1 ? 's' : ''}).`,
+      });
     } catch (err) {
       if (err instanceof ConflictError) {
-        await Promise.all([refreshTransactions(), getUserCategories()]);
+        await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
         setStatus({ kind: 'error', text: 'Data was changed by another tab — please retry the rename.' });
       } else {
         setStatus({ kind: 'error', text: (err as Error).message });
@@ -193,19 +194,20 @@ export default function Settings() {
     setStatus(null);
     try {
       const result = await deleteCategory(name, 'Other');
-      setStatus({
-        kind: 'success',
-        text: `Deleted "${name}" (reassigned ${result.reassigned} transaction${result.reassigned !== 1 ? 's' : ''}, removed ${result.mappingsRemoved} mapping${result.mappingsRemoved !== 1 ? 's' : ''}).`,
-      });
-      // Optimistic local update
+      // Update local state AFTER the API call succeeds to avoid racing the
+      // useUserCategories auto-save hook with the explicit mutation.
       setUserCategories((prev) => ({
         customCategories: prev.customCategories.filter((c) => c !== name),
         mappings: prev.mappings.filter((m) => m.category !== name),
       }));
-      await Promise.all([refreshTransactions(), getUserCategories()]);
+      await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
+      setStatus({
+        kind: 'success',
+        text: `Deleted "${name}" (reassigned ${result.reassigned} transaction${result.reassigned !== 1 ? 's' : ''}, removed ${result.mappingsRemoved} mapping${result.mappingsRemoved !== 1 ? 's' : ''}).`,
+      });
     } catch (err) {
       if (err instanceof ConflictError) {
-        await Promise.all([refreshTransactions(), getUserCategories()]);
+        await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
         setStatus({ kind: 'error', text: 'Data was changed by another tab — please retry the deletion.' });
       } else {
         setStatus({ kind: 'error', text: (err as Error).message });

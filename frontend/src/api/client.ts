@@ -247,9 +247,13 @@ export async function addTransactions(
 export type TransactionUpdate = Partial<Pick<Transaction, 'date' | 'description' | 'category' | 'amount' | 'notes' | 'archived'>>;
 
 export async function updateTransaction(id: string, updates: TransactionUpdate): Promise<Transaction> {
+  const expectedVersion = lastKnownVersion('transactions');
+  if (expectedVersion === undefined) {
+    throw new Error('Cannot update transaction without first fetching transactions.');
+  }
   return request(`/api/transactions/${id}`, {
     method: 'PUT',
-    body: JSON.stringify(updates),
+    body: JSON.stringify({ ...updates, expectedVersion }),
   });
 }
 
@@ -300,9 +304,13 @@ export async function addIncome(
 export type IncomeUpdate = Partial<Pick<IncomeEntry, 'date' | 'description' | 'grossAmount' | 'netAmount'>>;
 
 export async function updateIncome(id: string, updates: IncomeUpdate): Promise<IncomeEntry> {
+  const expectedVersion = lastKnownVersion('income');
+  if (expectedVersion === undefined) {
+    throw new Error('Cannot update income entry without first fetching income entries.');
+  }
   return request(`/api/income/${id}`, {
     method: 'PUT',
-    body: JSON.stringify(updates),
+    body: JSON.stringify({ ...updates, expectedVersion }),
   });
 }
 

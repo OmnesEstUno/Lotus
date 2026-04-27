@@ -171,6 +171,23 @@ a:hover { color: var(--accent-hover); }
 .nav-link-logout { color: var(--text-muted); margin-left: var(--space-2); }
 .nav-link-logout:hover { color: var(--danger); background: var(--danger-bg); }
 
+.navbar-user {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.main-content-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: calc(100vh - 56px);
+}
+
+.main-content-inner {
+  flex: 1;
+  padding: var(--space-8) 0;
+  min-width: 0;
+}
+
 /* ─── Card ───────────────────────────────────────────────────────────────── */
 .card {
   background: var(--bg-card);

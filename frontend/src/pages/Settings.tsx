@@ -10,21 +10,14 @@ import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CARD_LABELS, CardId } from '../hooks/useDashboardLayout';
 import {
   DndContext,
-  DragEndEvent,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
   closestCenter,
 } from '@dnd-kit/core';
 import {
   SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { useSortableListReorder } from '../hooks/useSortableListReorder';
 import { CSS } from '@dnd-kit/utilities';
 import InviteTokensCard from '../components/InviteTokensCard';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -34,7 +27,6 @@ import DangerZone from '../components/DangerZone';
 import FeatureRequestCard from '../components/FeatureRequestCard';
 import FeatureRequestsAdminCard from '../components/FeatureRequestsAdminCard';
 import Layout from '../components/layout/Layout';
-import { TOUCH_SENSOR_DELAY_MS, TOUCH_SENSOR_TOLERANCE_PX } from '../utils/constants';
 
 interface CardVisibilityRowProps {
   id: CardId;
@@ -99,22 +91,7 @@ export default function Settings() {
   const currentUser = useCurrentUser();
   const { isActiveOwner, activeInstanceId } = useWorkspaces();
   const { cardOrder, setCardOrder, hidden, toggleHidden } = useDashboardLayout(activeInstanceId);
-  const sensors = useSensors(
-    useSensor(MouseSensor),
-    useSensor(TouchSensor, { activationConstraint: { delay: TOUCH_SENSOR_DELAY_MS, tolerance: TOUCH_SENSOR_TOLERANCE_PX } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleCardOrderDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    setCardOrder((curr) => {
-      const oldIdx = curr.indexOf(active.id as CardId);
-      const newIdx = curr.indexOf(over.id as CardId);
-      if (oldIdx < 0 || newIdx < 0) return curr;
-      return arrayMove(curr, oldIdx, newIdx);
-    });
-  }
+  const { sensors, onDragEnd: handleCardOrderDragEnd } = useSortableListReorder(cardOrder, setCardOrder);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [income, setIncome] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);

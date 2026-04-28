@@ -1,20 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   DndContext,
-  DragEndEvent,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
   closestCenter,
 } from '@dnd-kit/core';
 import {
   SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { useSortableListReorder } from '../hooks/useSortableListReorder';
 import { Transaction, IncomeEntry, TimeRange, Category, CustomDateRange } from '../types';
 import {
   getTransactions,
@@ -58,7 +51,7 @@ import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CardId } from '../hooks/useDashboardLayout';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
-import { TOUCH_SENSOR_DELAY_MS, TOUCH_SENSOR_TOLERANCE_PX, YEAR_LOOKBACK } from '../utils/constants';
+import { YEAR_LOOKBACK } from '../utils/constants';
 import { dialog } from '../utils/dialog';
 
 // Undo-toast payload: what was just deleted, so we can restore it if the
@@ -105,18 +98,9 @@ export default function Dashboard() {
     hidden,
   } = useDashboardLayout(activeInstanceId);
 
-  // Drag sensors. MouseSensor fires immediately on desktop; TouchSensor
-  // requires a 200ms long-press so mobile scrolls aren't hijacked. Keyboard
-  // sensor gives full a11y (tab → space → arrow keys → space).
-  const sensors = useSensors(
-    useSensor(MouseSensor),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: TOUCH_SENSOR_DELAY_MS, tolerance: TOUCH_SENSOR_TOLERANCE_PX },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
+  // Drag sensors + drag-end handler via shared hook (MouseSensor / TouchSensor
+  // long-press / KeyboardSensor for a11y).
+  const { sensors, onDragEnd: handleDragEnd } = useSortableListReorder(cardOrder, setCardOrder);
 
   const refetchAll = useCallback(async () => {
     try {
@@ -153,17 +137,6 @@ export default function Dashboard() {
     setLoading(true);
     refetchAll().finally(() => setLoading(false));
   }, [activeInstanceId, refetchAll]);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    setCardOrder((curr) => {
-      const oldIdx = curr.indexOf(active.id as CardId);
-      const newIdx = curr.indexOf(over.id as CardId);
-      if (oldIdx < 0 || newIdx < 0) return curr;
-      return arrayMove(curr, oldIdx, newIdx);
-    });
-  }, []);
 
   /**
    * Delete wrapper: captures the full rows being deleted (for undo), then

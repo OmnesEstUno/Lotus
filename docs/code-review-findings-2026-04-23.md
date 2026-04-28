@@ -300,6 +300,40 @@ Net effect: the codebase is **better organized**, **more secure**, **race-condit
 - **Two-import-statement style** in `CategoryLineChart.tsx` (cosmetic, not an unused-import issue).
 - **`writeAllYears` ordering** in `worker/src/paginated.ts` — not changed; bulk-rewrite ordering is genuinely ambiguous and warrants a separate decision.
 
+## Phase 14 — Second-pass deduplication (factories)
+
+After the initial 13-phase cleanup, a follow-up survey identified six remaining structural duplication candidates that wouldn't have been caught by the first pass because they emerged from cumulative cleanup (e.g., the optimistic-concurrency pattern from Phase 6.1 created N similar mutation handlers; the dnd-kit usage in Dashboard + Settings reorder code).
+
+| Phase | What changed | Files | Approach |
+|---|---|---|---|
+| 14a | Invites adapter factory | `worker/src/invite-primitives.ts`, `invites.ts`, `workspace-invites.ts` | `makeInviteModule<TRecord, TCreateOpts, TListOpts>()` returns a fully-typed CRUD object. Each adapter file shrank: `invites.ts` 52→22 lines, `workspace-invites.ts` 70→33 lines. Public API (function names + signatures) unchanged. |
+| 14b | Worker `mutateVersioned` helper | `worker/src/index.ts` | Helper handles only concurrency control (parse `expectedVersion`, 400/409 logic, write-with-incremented-version, success response). Auth checks remain at endpoint layer. 6 endpoints migrated; 7 skipped (multi-resource, multi-version, or different response shapes). |
+| 14c | Frontend `runMutation` helper | new `frontend/src/utils/mutation.ts` + Dashboard, Settings, DataEntry, WorkspacesCard | 12 mutation handlers consolidated. The helper takes `{ onStart, call, onSuccess, onConflict, onError, onFinally, conflictMessage }` and the page handlers become 5-10 lines each. All 12 `instanceof ConflictError` checks in pages/components removed. |
+| 14d | `useSortableListReorder` hook | new `frontend/src/hooks/useSortableListReorder.ts` + Dashboard, Settings | Eliminated duplicated dnd-kit setup (sensors + drag-end handler). 14 lines removed from Dashboard, 15 from Settings. |
+| 14e | `useListWithActions` hook | new `frontend/src/hooks/useListWithActions.ts` + ArchivedCard | One of three candidate components migrated; InviteTokensCard (intertwined QR-map state, conditional `expandedId`) and WorkspaceInvitesPanel (prop-driven re-fetch, response-derived state) didn't fit cleanly and were left intact. |
+| 14f | `getVersionedList` helper | `frontend/src/api/client.ts` | 2 GET functions migrated (`getTransactions`, `getIncome`). `getUserCategories` (returns object, not array) and `getInstances` (per-item versioning) skipped. |
+
+**Honest accounting on line counts:** The factories themselves add lines. Phase 14 net delta is **+114 lines** (12,759 → 12,873). The wins are:
+
+- Structural duplication eliminated (the user's original concern).
+- One source of truth for each pattern — future bugs/changes happen in one place.
+- Future similar resources (new invite types, new versioned endpoints, new sortable lists) require ~10 lines of configuration instead of ~50 lines of copy-paste.
+- All `ConflictError` recovery now flows through one helper — easier to reason about.
+
+**Phase 14 commits (6):**
+- `d7aa328` — invite adapters factory
+- `98cd8de` — worker mutateVersioned helper
+- `253e998` — frontend runMutation helper
+- `bab28bf` — useSortableListReorder hook
+- `5af2bb2` — useListWithActions hook
+- `3025991` — getVersionedList helper
+
+## Updated Final State
+
+- **Total commits since main:** 63 (was 57 after Phase 13).
+- **Final LOC:** 12,873 (was 12,759).
+- **Skipped consolidations** (with reasons documented above): InviteTokensCard, WorkspaceInvitesPanel, getUserCategories, getInstances, multi-version worker endpoints, single-record query-param endpoint, FeatureRequest cards, chart containers, chart tooltips, CSV parsers.
+
 ## Next Steps
 
 1. Merge `chore/code-review-cleanup` to `main` (or open as a PR for review).

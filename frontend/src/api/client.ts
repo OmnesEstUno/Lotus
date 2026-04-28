@@ -244,6 +244,26 @@ export async function setActiveInstance(instanceId: string): Promise<void> {
   await request('/api/instances/active', { method: 'PUT', body: JSON.stringify({ instanceId }) });
 }
 
+// ─── Versioned-list helper ───────────────────────────────────────────────────
+
+/**
+ * Fetch a versioned list resource.  Stashes the returned `version` under
+ * `versionKey` and returns the array stored at `payloadKey`.
+ *
+ * Pass `year` to append `?year=<n>` to the request path.
+ */
+async function getVersionedList<T, K extends string>(
+  path: string,
+  payloadKey: K,
+  versionKey: string,
+  year?: number,
+): Promise<T[]> {
+  const qs = year !== undefined ? `?year=${year}` : '';
+  const r = await request<{ [k in K]: T[] } & { version: number }>(`${path}${qs}`);
+  rememberVersion(versionKey, r.version);
+  return r[payloadKey];
+}
+
 // ─── Transactions ────────────────────────────────────────────────────────────
 
 /**
@@ -252,10 +272,7 @@ export async function setActiveInstance(instanceId: string): Promise<void> {
  * Always remembers the returned version for use by subsequent write calls.
  */
 export async function getTransactions(year?: number): Promise<Transaction[]> {
-  const qs = year ? `?year=${year}` : '';
-  const r = await request<{ transactions: Transaction[]; version: number }>(`/api/transactions${qs}`);
-  rememberVersion('transactions', r.version);
-  return r.transactions;
+  return getVersionedList<Transaction, 'transactions'>('/api/transactions', 'transactions', 'transactions', year);
 }
 
 /** Payload for addTransactions — each row may carry `allowDuplicate` to
@@ -312,10 +329,7 @@ export async function bulkUpdateCategory(
  * Always remembers the returned version for use by subsequent write calls.
  */
 export async function getIncome(year?: number): Promise<IncomeEntry[]> {
-  const qs = year ? `?year=${year}` : '';
-  const r = await request<{ income: IncomeEntry[]; version: number }>(`/api/income${qs}`);
-  rememberVersion('income', r.version);
-  return r.income;
+  return getVersionedList<IncomeEntry, 'income'>('/api/income', 'income', 'income', year);
 }
 
 export type AddIncomeInput = Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean };

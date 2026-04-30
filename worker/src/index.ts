@@ -17,6 +17,7 @@ import {
   generateTOTPSecret,
   verifyTOTP,
 } from './auth/crypto';
+import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './migrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites';
 import {
@@ -205,42 +206,6 @@ async function resolveInstance(
   const instance = JSON.parse(raw) as Instance;
   if (!instance.members.includes(auth.username)) return respond({ error: 'Forbidden.' }, 403, cors);
   return { instanceId, instance };
-}
-
-// ─── Rate limiting (per-key, KV-backed; eventually-consistent) ────────────────
-//
-// Cloudflare KV is eventually consistent — two concurrent requests at the same
-// edge POP can both read the pre-increment count. For brute-force traffic that
-// serializes to one POP per attacker, this still works. Documented limitation.
-
-interface RateLimitState { count: number; firstAt: number; }
-
-async function checkAndIncrement(
-  kv: KVNamespace,
-  key: string,
-  maxAttempts: number,
-  windowSeconds: number,
-): Promise<{ allowed: boolean; remainingSeconds: number }> {
-  const raw = await kv.get(key);
-  const now = Math.floor(Date.now() / 1000);
-  let state: RateLimitState;
-  if (raw) {
-    state = JSON.parse(raw) as RateLimitState;
-    if (now - state.firstAt > windowSeconds) {
-      state = { count: 1, firstAt: now };
-    } else {
-      state = { count: state.count + 1, firstAt: state.firstAt };
-    }
-  } else {
-    state = { count: 1, firstAt: now };
-  }
-  const remainingSeconds = Math.max(0, windowSeconds - (now - state.firstAt));
-  await kv.put(key, JSON.stringify(state), { expirationTtl: Math.max(60, remainingSeconds) });
-  return { allowed: state.count <= maxAttempts, remainingSeconds };
-}
-
-async function clearRateLimit(kv: KVNamespace, key: string): Promise<void> {
-  await kv.delete(key);
 }
 
 // ─── Timing-safe dummy hash (lazy, computed once per worker lifetime) ─────────

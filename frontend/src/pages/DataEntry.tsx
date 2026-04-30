@@ -1,26 +1,29 @@
 import { useState, useRef, useEffect, FormEvent, DragEvent } from 'react';
+import { SUCCESS_FLASH_DURATION_MS } from '../utils/constants';
 import { BUILT_IN_CATEGORIES, Category, IncomeEntry, ParsedCSVRow } from '../types';
-import { parseTransactionCSV, parseIncomeCSV } from '../utils/csvParser';
+import { parseTransactionCSV } from '../utils/csv/parseTransactions';
+import { parseIncomeCSV } from '../utils/csv/parseIncome';
 import { parsePDFPaystub, extractIncomeFromCSVText, ExtractedPaystub } from '../utils/pdfParser';
 import {
   addTransactions,
-  addIncome,
   getTransactions,
-  getIncome,
-  AddTransactionInput,
-} from '../api/client';
-import { formatCurrency } from '../utils/dataProcessing';
+} from '../api/transactions';
+import type { AddTransactionInput } from '../api/transactions';
+import { addIncome, getIncome } from '../api/income';
+import { runMutation } from '../utils/mutation';
+import { formatCurrency } from '../utils/dataProcessing/shared';
 import {
   buildExistingDedupLookup,
   ExistingDedupLookup,
   findDuplicateMatch,
   DuplicateMatch,
   recordRowInBatch,
-} from '../utils/dedup';
+} from '../utils/deduplication';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../components/CategorySelect';
 import DuplicateStatusCell, { DuplicateStatus } from '../components/data-entry/DuplicateStatusCell';
+import { dialog } from '../utils/dialog';
 
 interface DataEntryProps {
   onRequestClose: () => void;
@@ -44,6 +47,11 @@ interface PreviewRow {
 }
 
 export default function DataEntry({ onRequestClose, onPendingChange }: DataEntryProps) {
+  // Unmount guard — prevents setTimeout callbacks from firing against an
+  // unmounted component if the modal is closed before the flash completes.
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
+
   // Upload state
   const [dragOver, setDragOver] = useState(false);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
@@ -88,6 +96,10 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
   // ─── Active workspace ─────────────────────────────────────────────────────
   const { activeInstanceId } = useWorkspaces();
 
+  // Surfaced when duplicate detection data can't be fetched — warns the user
+  // that the dedup pre-check is unavailable (server still enforces it).
+  const [dedupUnavailable, setDedupUnavailable] = useState(false);
+
   // ─── Existing data for duplicate detection ──────────────────────────────
   // Loaded on mount (and whenever the active workspace changes) so CSV rows
   // can be marked as potential duplicates before the user even clicks Import.
@@ -100,8 +112,14 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
   useEffect(() => {
     if (!activeInstanceId) return;
     Promise.all([getTransactions(), getIncome()])
-      .then(([txns, inc]) => setExistingDedupLookup(buildExistingDedupLookup(txns, inc)))
-      .catch(() => {});
+      .then(([txns, inc]) => {
+        setExistingDedupLookup(buildExistingDedupLookup(txns, inc));
+        setDedupUnavailable(false);
+      })
+      .catch((err) => {
+        console.error('Failed to load existing data for duplicate detection', err);
+        setDedupUnavailable(true);
+      });
   }, [activeInstanceId]);
 
   // ─── Pending change tracking ──────────────────────────────────────────────
@@ -131,12 +149,12 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
     onPendingChange,
   ]);
 
-  function handlePreviewCategoryChange(rowIdx: number, pickedValue: string) {
+  async function handlePreviewCategoryChange(rowIdx: number, pickedValue: string) {
     let categoryName: string | null = pickedValue;
     let isCustom = userCategories.customCategories.includes(pickedValue);
 
     if (pickedValue === NEW_CATEGORY_SENTINEL) {
-      const input = window.prompt('Name for the new category:');
+      const input = await dialog.prompt('Name for the new category:');
       if (!input) return;
       categoryName = addCustomCategory(input);
       if (!categoryName) return;
@@ -152,9 +170,9 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
     }
   }
 
-  function handleManualCategoryChange(pickedValue: string) {
+  async function handleManualCategoryChange(pickedValue: string) {
     if (pickedValue === NEW_CATEGORY_SENTINEL) {
-      const input = window.prompt('Name for the new category:');
+      const input = await dialog.prompt('Name for the new category:');
       if (!input) return;
       const name = addCustomCategory(input);
       if (!name) return;
@@ -267,84 +285,93 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
       );
       return;
     }
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      // Denied rows are dropped entirely
-      const toSubmit = previewRows.filter((r) => r.duplicateStatus !== 'denied');
-      const expenseRows = toSubmit.filter((r) => r.row.kind === 'expense');
-      const incomeRows = toSubmit.filter((r) => r.row.kind === 'income');
+    await runMutation({
+      onStart: () => { setSubmitting(true); setSubmitError(null); },
+      call: async () => {
+        // Denied rows are dropped entirely
+        const toSubmit = previewRows.filter((r) => r.duplicateStatus !== 'denied');
+        const expenseRows = toSubmit.filter((r) => r.row.kind === 'expense');
+        const incomeRows = toSubmit.filter((r) => r.row.kind === 'income');
 
-      let addedTxns = 0;
-      let skippedTxns = 0;
-      if (expenseRows.length > 0) {
-        const txns: AddTransactionInput[] = expenseRows.map((r) => {
-          const row = r.row as Extract<ParsedCSVRow, { kind: 'expense' }>;
-          return {
+        let addedTxns = 0;
+        let skippedTxns = 0;
+        if (expenseRows.length > 0) {
+          const txns: AddTransactionInput[] = expenseRows.map((r) => {
+            const row = r.row as Extract<ParsedCSVRow, { kind: 'expense' }>;
+            return {
+              date: row.date,
+              description: row.description,
+              notes: '',
+              category: row.category,
+              amount: row.amount,
+              type: row.type,
+              source: 'csv' as const,
+              // Approved duplicates bypass the server's dedup check
+              allowDuplicate: r.duplicateStatus === 'approved',
+            };
+          });
+          const result = await addTransactions(txns);
+          addedTxns = result.added;
+          skippedTxns = result.skipped;
+        }
+
+        let addedIncome = 0;
+        let skippedIncome = 0;
+        for (const r of incomeRows) {
+          const row = r.row as Extract<ParsedCSVRow, { kind: 'income' }>;
+          const result = await addIncome({
             date: row.date,
             description: row.description,
-            notes: '',
-            category: row.category,
-            amount: row.amount,
-            type: row.type,
-            source: 'csv' as const,
+            grossAmount: row.amount,
+            netAmount: row.amount,
+            taxes: { federal: 0, state: 0, socialSecurity: 0, medicare: 0, other: 0 },
+            source: 'manual',
             // Approved duplicates bypass the server's dedup check
             allowDuplicate: r.duplicateStatus === 'approved',
-          };
-        });
-        const result = await addTransactions(txns);
-        addedTxns = result.added;
-        skippedTxns = result.skipped;
-      }
+          });
+          if (result.skipped) skippedIncome++;
+          else addedIncome++;
+        }
 
-      let addedIncome = 0;
-      let skippedIncome = 0;
-      for (const r of incomeRows) {
-        const row = r.row as Extract<ParsedCSVRow, { kind: 'income' }>;
-        const result = await addIncome({
-          date: row.date,
-          description: row.description,
-          grossAmount: row.amount,
-          netAmount: row.amount,
-          taxes: { federal: 0, state: 0, socialSecurity: 0, medicare: 0, other: 0 },
-          source: 'manual',
-          // Approved duplicates bypass the server's dedup check
-          allowDuplicate: r.duplicateStatus === 'approved',
-        });
-        if (result.skipped) skippedIncome++;
-        else addedIncome++;
-      }
+        return { addedTxns, skippedTxns, addedIncome, skippedIncome };
+      },
+      onSuccess: ({ addedTxns, skippedTxns, addedIncome, skippedIncome }) => {
+        // Build a concise result summary
+        const importedParts: string[] = [];
+        if (addedTxns > 0) importedParts.push(`${addedTxns} expense${addedTxns !== 1 ? 's' : ''}`);
+        if (addedIncome > 0) importedParts.push(`${addedIncome} income entr${addedIncome !== 1 ? 'ies' : 'y'}`);
 
-      // Build a concise result summary
-      const importedParts: string[] = [];
-      if (addedTxns > 0) importedParts.push(`${addedTxns} expense${addedTxns !== 1 ? 's' : ''}`);
-      if (addedIncome > 0) importedParts.push(`${addedIncome} income entr${addedIncome !== 1 ? 'ies' : 'y'}`);
-
-      const skippedTotal = skippedTxns + skippedIncome;
-      let message: string;
-      if (importedParts.length === 0 && skippedTotal > 0) {
-        message = `No new records imported — all ${skippedTotal} ${skippedTotal !== 1 ? 'entries were' : 'entry was'} already in your data.`;
-      } else if (importedParts.length > 0 && skippedTotal > 0) {
-        message = `Imported ${importedParts.join(' and ')}. ${skippedTotal} duplicate${skippedTotal !== 1 ? 's' : ''} skipped.`;
-      } else if (importedParts.length > 0) {
-        message = `Successfully imported ${importedParts.join(' and ')}.`;
-      } else {
-        message = 'Nothing was imported.';
-      }
-      setSubmitSuccess(message);
-      setPreviewRows([]);
-      setParseErrors([]);
-      setSkippedCount(0);
-      // Brief pause so the success message is visible, then close the modal
-      setTimeout(() => {
-        onPendingChange(false);
-        onRequestClose();
-      }, 1200);
-    } catch (err) {
-      setSubmitError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+        const skippedTotal = skippedTxns + skippedIncome;
+        let message: string;
+        if (importedParts.length === 0 && skippedTotal > 0) {
+          message = `No new records imported — all ${skippedTotal} ${skippedTotal !== 1 ? 'entries were' : 'entry was'} already in your data.`;
+        } else if (importedParts.length > 0 && skippedTotal > 0) {
+          message = `Imported ${importedParts.join(' and ')}. ${skippedTotal} duplicate${skippedTotal !== 1 ? 's' : ''} skipped.`;
+        } else if (importedParts.length > 0) {
+          message = `Successfully imported ${importedParts.join(' and ')}.`;
+        } else {
+          message = 'Nothing was imported.';
+        }
+        setSubmitSuccess(message);
+        setPreviewRows([]);
+        setParseErrors([]);
+        setSkippedCount(0);
+        // Brief pause so the success message is visible, then close the modal
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
+          onPendingChange(false);
+          onRequestClose();
+        }, SUCCESS_FLASH_DURATION_MS);
+      },
+      onConflict: async (msg) => {
+        // Refresh versions, then surface a user-actionable message
+        await Promise.all([getTransactions(), getIncome()]);
+        setSubmitError(msg);
+      },
+      onError: (msg) => setSubmitError(msg),
+      onFinally: () => setSubmitting(false),
+      conflictMessage: 'Data was changed by another tab while importing. Please retry the import.',
+    });
   }
 
   // ─── Manual Expense ──────────────────────────────────────────────────────
@@ -354,29 +381,32 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
   const [manualDuplicatePending, setManualDuplicatePending] = useState<AddTransactionInput | null>(null);
 
   async function submitManualExpense(payload: AddTransactionInput) {
-    setSubmitting(true);
-    try {
-      const { added, skipped } = await addTransactions([payload]);
-      if (added === 0 && skipped > 0) {
-        setManualError('A transaction with this date, description, and amount already exists.');
-        setManualDuplicatePending(payload);
-        return;
-      }
-      setManualSuccess(`Added "${payload.description}" for ${formatCurrency(Math.abs(payload.amount))}.`);
-      setManualDate('');
-      setManualDesc('');
-      setManualAmount('');
-      setManualCategory('Other');
-      setManualDuplicatePending(null);
-      setTimeout(() => {
-        onPendingChange(false);
-        onRequestClose();
-      }, 1200);
-    } catch (err) {
-      setManualError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    await runMutation({
+      onStart: () => setSubmitting(true),
+      call: () => addTransactions([payload]),
+      onSuccess: ({ added, skipped }) => {
+        if (added === 0 && skipped > 0) {
+          setManualError('A transaction with this date, description, and amount already exists.');
+          setManualDuplicatePending(payload);
+          return;
+        }
+        setManualSuccess(`Added "${payload.description}" for ${formatCurrency(Math.abs(payload.amount))}.`);
+        setManualDate('');
+        setManualDesc('');
+        setManualAmount('');
+        setManualCategory('Other');
+        setManualDuplicatePending(null);
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
+          onPendingChange(false);
+          onRequestClose();
+        }, SUCCESS_FLASH_DURATION_MS);
+      },
+      onConflict: async (msg) => { await getTransactions(); setManualError(msg); },
+      onError: (msg) => setManualError(msg),
+      onFinally: () => setSubmitting(false),
+      conflictMessage: 'Data was changed by another tab — please retry.',
+    });
   }
 
   async function handleManualExpense(e: FormEvent) {
@@ -449,32 +479,35 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
   const [incomeDuplicatePending, setIncomeDuplicatePending] = useState<Omit<IncomeEntry, 'id'> | null>(null);
 
   async function submitManualIncome(entry: Omit<IncomeEntry, 'id'>, allowDuplicate = false) {
-    setSubmitting(true);
-    try {
-      const result = await addIncome({ ...entry, allowDuplicate });
-      if (result.skipped) {
-        setIncomeError('An income entry with this date, description, and amount already exists.');
-        setIncomeDuplicatePending(entry);
-        return;
-      }
-      const totalTax = Object.values(entry.taxes).reduce((s, v) => s + v, 0);
-      setIncomeSuccess(
-        `Income of ${formatCurrency(entry.grossAmount)} recorded.` +
-          (totalTax > 0 ? ` ${formatCurrency(totalTax)} in taxes has been added to your expense tracking.` : ''),
-      );
-      setIncDesc(''); setIncDate(''); setIncGross(''); setIncNet('');
-      setIncFederal(''); setIncState(''); setIncSS(''); setIncMedicare(''); setIncOther('');
-      setIncomeFile(null); setIncomeLowConfidence(false);
-      setIncomeDuplicatePending(null);
-      setTimeout(() => {
-        onPendingChange(false);
-        onRequestClose();
-      }, 1200);
-    } catch (err) {
-      setIncomeError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    await runMutation({
+      onStart: () => setSubmitting(true),
+      call: () => addIncome({ ...entry, allowDuplicate }),
+      onSuccess: (result) => {
+        if (result.skipped) {
+          setIncomeError('An income entry with this date, description, and amount already exists.');
+          setIncomeDuplicatePending(entry);
+          return;
+        }
+        const totalTax = Object.values(entry.taxes).reduce((s, v) => s + v, 0);
+        setIncomeSuccess(
+          `Income of ${formatCurrency(entry.grossAmount)} recorded.` +
+            (totalTax > 0 ? ` ${formatCurrency(totalTax)} in taxes has been added to your expense tracking.` : ''),
+        );
+        setIncDesc(''); setIncDate(''); setIncGross(''); setIncNet('');
+        setIncFederal(''); setIncState(''); setIncSS(''); setIncMedicare(''); setIncOther('');
+        setIncomeFile(null); setIncomeLowConfidence(false);
+        setIncomeDuplicatePending(null);
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
+          onPendingChange(false);
+          onRequestClose();
+        }, SUCCESS_FLASH_DURATION_MS);
+      },
+      onConflict: async (msg) => { await getIncome(); setIncomeError(msg); },
+      onError: (msg) => setIncomeError(msg),
+      onFinally: () => setSubmitting(false),
+      conflictMessage: 'Data was changed by another tab — please retry.',
+    });
   }
 
   async function handleIncomeSubmit(e: FormEvent) {
@@ -519,22 +552,22 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: '1.25rem', marginBottom: 4 }}>Enter Data</h2>
-        <p style={{ color: 'var(--text-muted)' }}>
+      <div className="data-entry-header">
+        <h2 className="data-entry-title">Enter Data</h2>
+        <p className="text-muted">
           Upload transaction CSVs from any supported bank/credit card, or enter records manually below.
         </p>
       </div>
 
       {/* ── Unified Upload ── */}
-      <div className="card" style={{ marginBottom: 32 }}>
+      <div className="card card-mb">
           <div className="card-header">
             <h2>Upload Transactions</h2>
             <span className="text-xs text-muted">Works with any bank or card CSV — columns auto-detected</span>
           </div>
 
           {submitSuccess && (
-            <div className="alert alert-success" style={{ marginBottom: 16 }}>
+            <div className="alert alert-success alert-mb">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
@@ -542,18 +575,27 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
             </div>
           )}
           {submitError && (
-            <div className="alert alert-danger" style={{ marginBottom: 16 }}>
+            <div className="alert alert-danger alert-mb">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               {submitError}
             </div>
           )}
+          {dedupUnavailable && (
+            <div className="alert alert-warning alert-mb">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              Duplicate detection unavailable — existing data could not be fetched. New rows may overlap with existing ones.
+            </div>
+          )}
           {parseErrors.length > 0 && (
-            <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="parse-errors-list">
               {parseErrors.map((err, i) => (
                 <div key={i} className="alert alert-danger">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="alert-icon">
                     <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
                   {err}
@@ -571,7 +613,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
               onClick={() => fileInputRef.current?.click()}
             >
               <div className="drop-zone-icon">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.5 }}>
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="drop-zone-upload-icon">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="17 8 12 3 7 8" />
                   <line x1="12" y1="3" x2="12" y2="15" />
@@ -581,11 +623,11 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
               <p className="drop-zone-hint">
                 Handles expenses and income together. Transfers and credit card payments are skipped automatically.
               </p>
-              <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={onFileSelect} />
+              <input ref={fileInputRef} type="file" accept=".csv" className="file-input-hidden" onChange={onFileSelect} />
             </div>
           ) : (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+              <div className="preview-controls">
                 <p style={{ color: 'var(--text-secondary)' }}>
                   <strong style={{ color: 'var(--text-primary)' }}>{previewRows.length}</strong> records found
                   {skippedCount > 0 && (
@@ -593,7 +635,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                   )}
                   . Review and edit before importing.
                 </p>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div className="preview-btn-group">
                   <button className="btn btn-ghost btn-sm" onClick={() => { setPreviewRows([]); setParseErrors([]); setSkippedCount(0); }}>Clear</button>
                   <button className="btn btn-primary btn-sm" onClick={submitUpload} disabled={submitting || pendingDuplicateCount > 0}>
                     {submitting ? <span className="spinner" /> : `Import ${previewRows.filter((r) => r.duplicateStatus !== 'denied').length} Records`}
@@ -604,16 +646,15 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
               {/* Duplicate banner — shown whenever any duplicates exist */}
               {totalDuplicateCount > 0 && (
                 <div
-                  className={`alert ${pendingDuplicateCount > 0 ? 'alert-warning' : 'alert-info'}`}
-                  style={{ marginBottom: 12, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}
+                  className={`alert alert-mb alert-stack ${pendingDuplicateCount > 0 ? 'alert-warning' : 'alert-info'}`}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                  <div className="alert-row">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="alert-icon">
                       <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                       <line x1="12" y1="9" x2="12" y2="13" />
                       <line x1="12" y1="17" x2="12.01" y2="17" />
                     </svg>
-                    <div style={{ flex: 1 }}>
+                    <div className="alert-body">
                       {pendingDuplicateCount > 0 ? (
                         <>
                           <strong>{pendingDuplicateCount}</strong> row{pendingDuplicateCount !== 1 ? 's' : ''} look{pendingDuplicateCount === 1 ? 's' : ''} like{' '}
@@ -626,7 +667,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                     </div>
                   </div>
                   {pendingDuplicateCount > 0 && (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <div className="alert-btn-group">
                       <button className="btn btn-sm btn-secondary" onClick={approveAllPendingDuplicates}>
                         Approve all {pendingDuplicateCount}
                       </button>
@@ -648,7 +689,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                       <th>Category</th>
                       <th className="num">Amount</th>
                       <th>Status</th>
-                      <th style={{ width: 40 }}></th>
+                      <th className="table-actions-col"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -664,7 +705,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                               : {};
                       return (
                         <tr key={idx} style={rowStyle}>
-                          <td className="text-sm font-mono" style={{ whiteSpace: 'nowrap' }}>{row.date}</td>
+                          <td className="text-sm font-mono nowrap-cell">{row.date}</td>
                           <td>
                             <span
                               className="chip"
@@ -679,15 +720,13 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                           </td>
                           <td>
                             <input
-                              className="input"
-                              style={{ padding: '4px 8px', fontSize: '0.8125rem' }}
+                              className="input input-compact"
                               value={row.description}
                               onChange={(e) => updateRow(idx, (r) => ({ ...r, description: e.target.value } as ParsedCSVRow))}
                             />
                             {duplicateMatch && duplicateStatus !== 'unique' && (
                               <div
-                                className="text-xs text-muted"
-                                style={{ marginTop: 4, paddingLeft: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                className="text-xs text-muted duplicate-match-hint"
                                 title={`Matches ${duplicateMatch.source === 'existing' ? 'an existing entry' : 'an earlier row in this file'}: ${duplicateMatch.summary}`}
                               >
                                 ↳ Matches {duplicateMatch.source === 'existing' ? 'existing' : 'row above'}: {duplicateMatch.summary}
@@ -719,10 +758,9 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                           </td>
                           <td>
                             <button
-                              className="btn btn-ghost btn-sm"
+                              className="btn btn-ghost btn-sm btn-icon-sm"
                               onClick={() => removeRow(idx)}
                               title="Remove row"
-                              style={{ padding: '4px 8px' }}
                             >
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -754,17 +792,17 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
           </div>
 
           {manualTab === 'expense' && (
-            <form onSubmit={handleManualExpense} style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 560 }}>
+            <form onSubmit={handleManualExpense} className="manual-form">
               {manualError && (
-                <div className="alert alert-danger" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 2 }}>
+                <div className="alert alert-danger alert-stack">
+                  <div className="alert-row-top">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="alert-icon-top">
                       <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
                     <span>{manualError}</span>
                   </div>
                   {manualDuplicatePending && (
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className="alert-btn-group">
                       <button
                         type="button"
                         className="btn btn-sm btn-secondary"
@@ -821,15 +859,15 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
           {manualTab === 'income' && (
             <>
               {incomeError && (
-                <div className="alert alert-danger" style={{ marginBottom: 16, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 2 }}>
+                <div className="alert alert-danger alert-mb alert-stack">
+                  <div className="alert-row-top">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="alert-icon-top">
                       <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
                     <span>{incomeError}</span>
                   </div>
                   {incomeDuplicatePending && (
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className="alert-btn-group">
                       <button
                         type="button"
                         className="btn btn-sm btn-secondary"
@@ -850,14 +888,14 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                 </div>
               )}
               {incomeSuccess && (
-                <div className="alert alert-success" style={{ marginBottom: 16 }}>
+                <div className="alert alert-success alert-mb">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
                   {incomeSuccess}
                 </div>
               )}
               {incomeLowConfidence && (
-                <div className="alert alert-warning" style={{ marginBottom: 16 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                <div className="alert alert-warning alert-mb">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="alert-icon">
                     <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                     <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
                   </svg>
@@ -866,20 +904,19 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
               )}
 
               <div
-                className={`drop-zone ${incomeParsing ? 'drag-over' : ''}`}
-                style={{ marginBottom: 20, padding: '24px 16px' }}
+                className={`drop-zone drop-zone-income ${incomeParsing ? 'drag-over' : ''}`}
                 onClick={() => !incomeParsing && incomeFileRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); }}
                 onDrop={async (e) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) await handleIncomeFile(file); }}
               >
                 {incomeParsing ? (
                   <>
-                    <div className="spinner" style={{ margin: '0 auto 8px' }} />
+                    <div className="spinner spinner-centered" />
                     <p className="drop-zone-text">Reading your pay stub…</p>
                   </>
                 ) : (
                   <>
-                    <p className="drop-zone-text" style={{ marginBottom: 2 }}>Upload a pay stub (PDF or CSV) to auto-fill the form</p>
+                    <p className="drop-zone-text drop-zone-text-tight">Upload a pay stub (PDF or CSV) to auto-fill the form</p>
                     <p className="drop-zone-hint">Values below will be pre-populated and you can adjust anything before saving.</p>
                   </>
                 )}
@@ -887,12 +924,12 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                   ref={incomeFileRef}
                   type="file"
                   accept=".pdf,.csv"
-                  style={{ display: 'none' }}
+                  className="file-input-hidden"
                   onChange={async (e) => { const file = e.target.files?.[0]; if (file) await handleIncomeFile(file); e.target.value = ''; }}
                 />
               </div>
 
-              <form onSubmit={handleIncomeSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 600 }}>
+              <form onSubmit={handleIncomeSubmit} className="income-form">
                 <div className="grid-2">
                   <div className="form-group">
                     <label className="form-label">Pay Date</label>
@@ -904,7 +941,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16 }}>
+                <div className="income-section">
                   <h3 style={{ marginBottom: 12, color: 'var(--text-secondary)' }}>Pay Amounts</h3>
                   <div className="grid-2">
                     <div className="form-group">
@@ -918,9 +955,9 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16 }}>
+                <div className="income-section">
                   <h3 style={{ marginBottom: 4, color: 'var(--text-secondary)' }}>Tax Deductions</h3>
-                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+                  <p className="income-section-desc">
                     These will be recorded as expenses in your "Taxes" category. Leave blank if unknown.
                   </p>
                   <div className="grid-2">

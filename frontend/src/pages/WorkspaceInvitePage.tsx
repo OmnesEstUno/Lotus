@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
-import { getWorkspaceInviteMeta, acceptWorkspaceInvite } from '../api/client';
+import { getWorkspaceInviteMeta, acceptWorkspaceInvite } from '../api/invites';
 import Logo from '../components/Logo';
+import { STORAGE_KEYS, UNIX_MS_MULTIPLIER } from '../utils/constants';
+import { sessionStore } from '../utils/storage';
 
 interface InviteMeta {
   instanceName: string;
@@ -44,7 +46,7 @@ export default function WorkspaceInvitePage() {
 
     // If not logged in, stash the token and redirect to login
     if (!currentUser) {
-      sessionStorage.setItem('ft_pending_workspace_invite', decoded);
+      sessionStore.set(STORAGE_KEYS.PENDING_WORKSPACE_INVITE, decoded);
       window.location.hash = '#/login';
       return;
     }
@@ -65,7 +67,7 @@ export default function WorkspaceInvitePage() {
     setActionError('');
     try {
       const result = await acceptWorkspaceInvite(token);
-      sessionStorage.removeItem('ft_pending_workspace_invite');
+      sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
       await refresh();
       await switchTo(result.id);
       navigate('/dashboard');
@@ -76,12 +78,12 @@ export default function WorkspaceInvitePage() {
   }
 
   function handleDecline() {
-    sessionStorage.removeItem('ft_pending_workspace_invite');
+    sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
     navigate('/dashboard');
   }
 
   function handleNavigateToWorkspace() {
-    sessionStorage.removeItem('ft_pending_workspace_invite');
+    sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
     navigate('/dashboard');
   }
 
@@ -130,7 +132,7 @@ export default function WorkspaceInvitePage() {
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                 <span>Owner: <strong style={{ color: 'var(--text-primary)' }}>{meta.ownerUsername}</strong></span>
-                <span>Expires: {new Date(meta.expiresAt * 1000).toLocaleDateString()}</span>
+                <span>Expires: {new Date(meta.expiresAt * UNIX_MS_MULTIPLIER).toLocaleDateString()}</span>
               </div>
             </div>
 

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { createInvite, listInvites, deleteInvite, InviteSummary } from '../api/client';
+import { createInvite, listInvites, deleteInvite } from '../api/invites';
+import type { InviteSummary } from '../api/invites';
+import { UNIX_MS_MULTIPLIER } from '../utils/constants';
+import { dialog } from '../utils/dialog';
 
 // Pre-compute QR data URLs for all active invites (eager, ~fast).
 async function buildQrMap(invites: InviteSummary[]): Promise<Map<string, string>> {
@@ -65,7 +68,7 @@ export default function InviteTokensCard() {
   }
 
   async function handleRevoke(id: string) {
-    if (!confirm('Revoke this invite?')) return;
+    if (!await dialog.confirm('Revoke this invite?')) return;
     try {
       await deleteInvite(id);
       if (expandedId === id) setExpandedId(null);
@@ -118,7 +121,7 @@ export default function InviteTokensCard() {
                   {inv.id.slice(0, 8)}…
                 </span>
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', flex: 1 }}>
-                  expires {new Date(inv.expiresAt * 1000).toLocaleDateString()}
+                  expires {new Date(inv.expiresAt * UNIX_MS_MULTIPLIER).toLocaleDateString()}
                 </span>
                 {inv.usedBy && (
                   <span style={{ color: 'var(--success)', fontSize: '0.8125rem', flexShrink: 0 }}>

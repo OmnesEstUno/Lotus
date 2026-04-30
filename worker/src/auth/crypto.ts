@@ -1,5 +1,8 @@
 // ─── Crypto: PBKDF2 password hashing ─────────────────────────────────────────
 
+const PBKDF2_ITERATIONS = 600_000;
+const PBKDF2_LEGACY_ITERATIONS = 100_000;
+
 function bytesToHex(u8: Uint8Array): string {
   return [...u8].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -8,28 +11,36 @@ function hexToBytes(hex: string): Uint8Array {
   return new Uint8Array((hex.match(/.{2}/g) ?? []).map((h) => parseInt(h, 16)));
 }
 
+async function derive(password: string, salt: Uint8Array, iterations: number): Promise<ArrayBuffer> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  return crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256);
+}
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
-    key,
-    256,
-  );
-  return `pbkdf2:${bytesToHex(salt)}:${bytesToHex(new Uint8Array(bits))}`;
+  const bits = await derive(password, salt, PBKDF2_ITERATIONS);
+  return `${PBKDF2_ITERATIONS}:${bytesToHex(salt)}:${bytesToHex(new Uint8Array(bits))}`;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split(':');
-  if (parts.length !== 3 || parts[0] !== 'pbkdf2') return false;
-  const [, saltHex, storedHashHex] = parts;
+  let iters: number, saltHex: string, storedHashHex: string;
+  if (parts.length === 3 && parts[0] === 'pbkdf2') {
+    // Legacy format: pbkdf2:${saltHex}:${hashHex}
+    iters = PBKDF2_LEGACY_ITERATIONS;
+    saltHex = parts[1];
+    storedHashHex = parts[2];
+  } else if (parts.length === 3 && /^\d+$/.test(parts[0])) {
+    // New format: ${iterations}:${saltHex}:${hashHex}
+    iters = Number(parts[0]);
+    if (iters < 100_000 || iters > 10_000_000) return false;
+    saltHex = parts[1];
+    storedHashHex = parts[2];
+  } else {
+    return false;
+  }
   const salt = hexToBytes(saltHex);
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
-    key,
-    256,
-  );
+  const bits = await derive(password, salt, iters);
   const newHashHex = bytesToHex(new Uint8Array(bits));
   // Constant-time comparison
   if (newHashHex.length !== storedHashHex.length) return false;
@@ -107,7 +118,7 @@ async function getTOTP(secret: string, stepOffset = 0): Promise<string> {
 }
 
 export async function verifyTOTP(secret: string, code: string): Promise<boolean> {
-  for (const offset of [-1, 0, 1]) {
+  for (const offset of [-1, 0]) {
     if ((await getTOTP(secret, offset)) === code) return true;
   }
   return false;

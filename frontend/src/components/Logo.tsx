@@ -8,18 +8,17 @@ interface LogoProps {
   style?: React.CSSProperties;
 }
 
-// Source SVG is 180×120 → width is 1.5× the height.
-const ASPECT = 180 / 120;
-
 /**
  * Lotus app logo.
  *
  * Implemented as a CSS mask: the traced SVG acts as an alpha mask and the
  * background-color provides the fill, so the logo picks up `currentColor`
  * from its parent (or any color you pass via the `color` prop).
+ *
+ * Source SVG is 180×120 → width is 1.5× the height.
  */
 export default function Logo({ size = 20, color = 'currentColor', style }: LogoProps) {
-  const width = Math.round(size * ASPECT);
+  const width = Math.round(size * 1.5); // 180/120 aspect ratio
   return (
     <span
       role="img"

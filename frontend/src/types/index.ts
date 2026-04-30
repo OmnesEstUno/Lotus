@@ -72,6 +72,8 @@ export interface Instance {
   owner: string;        // username
   members: string[];    // usernames including owner
   createdAt: string;
+  /** Optimistic-concurrency version.  Legacy records default to 0. */
+  version: number;
 }
 
 export type TimeRange = 'week' | 'month' | '3month' | 'year' | 'custom';

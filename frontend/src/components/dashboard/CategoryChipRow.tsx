@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Category } from '../../types';
-import { getCategoryColor } from '../../utils/categories';
+import { getCategoryColor } from '../../utils/categorization/colors';
 import CheckmarkToggle from '../CheckmarkToggle';
 
 export interface Chip {

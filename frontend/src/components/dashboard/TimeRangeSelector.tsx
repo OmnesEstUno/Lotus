@@ -30,4 +30,3 @@ export default function TimeRangeSelector({ value, onChange }: TimeRangeSelector
   );
 }
 
-export { TIME_RANGE_LABELS };

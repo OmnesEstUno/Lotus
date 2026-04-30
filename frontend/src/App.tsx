@@ -1,5 +1,5 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { isAuthenticated } from './api/client';
+import { isAuthenticated } from './api/auth';
 import { DataEntryProvider } from './contexts/DataEntryContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';

@@ -6,11 +6,16 @@ import {
   renameInstance,
   deleteInstance,
   removeInstanceMember,
+} from '../api/instances';
+import {
   createWorkspaceInvite,
   listWorkspaceInvites,
   deleteWorkspaceInvite,
-  WorkspaceInviteSummary,
-} from '../api/client';
+} from '../api/invites';
+import type { WorkspaceInviteSummary } from '../api/invites';
+import { runMutation } from '../utils/mutation';
+import { UNIX_MS_MULTIPLIER } from '../utils/constants';
+import { dialog } from '../utils/dialog';
 
 function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
   const [invites, setInvites] = useState<WorkspaceInviteSummary[]>([]);
@@ -46,7 +51,7 @@ function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
   }
 
   async function handleRevoke(inviteId: string) {
-    if (!confirm('Revoke this invite link?')) return;
+    if (!await dialog.confirm('Revoke this invite link?')) return;
     try {
       await deleteWorkspaceInvite(instanceId, inviteId);
       if (newInviteId === inviteId) { setNewLink(null); setNewInviteId(null); }
@@ -97,7 +102,7 @@ function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
               <li key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: '0.8125rem' }}>
                 <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{inv.id.slice(0, 8)}…</span>
                 <span style={{ color: 'var(--text-muted)', flex: 1 }}>
-                  expires {new Date(inv.expiresAt * 1000).toLocaleDateString()}
+                  expires {new Date(inv.expiresAt * UNIX_MS_MULTIPLIER).toLocaleDateString()}
                 </span>
                 {inv.usedBy
                   ? <span style={{ color: 'var(--success)', flexShrink: 0 }}>claimed by {inv.usedBy}</span>
@@ -119,7 +124,7 @@ export default function WorkspacesCard() {
   const [busy, setBusy] = useState(false);
 
   async function handleCreate() {
-    const name = prompt('Workspace name:');
+    const name = await dialog.prompt('Workspace name:');
     if (!name?.trim()) return;
     setBusy(true);
     setError('');
@@ -134,22 +139,21 @@ export default function WorkspacesCard() {
   }
 
   async function handleRename(id: string, current: string) {
-    const next = prompt('New name:', current);
+    const next = await dialog.prompt('New name:', current);
     if (!next?.trim() || next.trim() === current) return;
-    setBusy(true);
-    setError('');
-    try {
-      await renameInstance(id, next.trim());
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    await runMutation({
+      onStart: () => { setBusy(true); setError(''); },
+      call: () => renameInstance(id, next.trim()),
+      onSuccess: () => refresh(),
+      onConflict: async (msg) => { setError(msg); await refresh(); },
+      onError: (msg) => setError(msg),
+      onFinally: () => setBusy(false),
+      conflictMessage: 'This workspace was modified by another session. The page has been refreshed — please try again.',
+    });
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete workspace "${name}" and all its data? This cannot be undone.`)) return;
+    if (!await dialog.confirm(`Delete workspace "${name}" and all its data? This cannot be undone.`)) return;
     setBusy(true);
     setError('');
     try {
@@ -164,31 +168,29 @@ export default function WorkspacesCard() {
 
   async function handleLeave(id: string, name: string) {
     if (!currentUser) return;
-    if (!confirm(`Leave workspace "${name}"?`)) return;
-    setBusy(true);
-    setError('');
-    try {
-      await removeInstanceMember(id, currentUser);
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    if (!await dialog.confirm(`Leave workspace "${name}"?`)) return;
+    await runMutation({
+      onStart: () => { setBusy(true); setError(''); },
+      call: () => removeInstanceMember(id, currentUser),
+      onSuccess: () => refresh(),
+      onConflict: async (msg) => { setError(msg); await refresh(); },
+      onError: (msg) => setError(msg),
+      onFinally: () => setBusy(false),
+      conflictMessage: 'This workspace was modified by another session. The page has been refreshed — please try again.',
+    });
   }
 
   async function handleRemoveMember(id: string, memberUsername: string) {
-    if (!confirm(`Remove ${memberUsername} from this workspace?`)) return;
-    setBusy(true);
-    setError('');
-    try {
-      await removeInstanceMember(id, memberUsername);
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    if (!await dialog.confirm(`Remove ${memberUsername} from this workspace?`)) return;
+    await runMutation({
+      onStart: () => { setBusy(true); setError(''); },
+      call: () => removeInstanceMember(id, memberUsername),
+      onSuccess: () => refresh(),
+      onConflict: async (msg) => { setError(msg); await refresh(); },
+      onError: (msg) => setError(msg),
+      onFinally: () => setBusy(false),
+      conflictMessage: 'This workspace was modified by another session. The page has been refreshed — please try again.',
+    });
   }
 
   return (

@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { logout } from '../../api/client';
+import { logout } from '../../api/auth';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
 import { useDataEntry } from '../../contexts/DataEntryContext';
 import Logo from '../Logo';
@@ -58,16 +58,16 @@ export default function Layout({ children }: LayoutProps) {
                 Logout
               </button>
               {currentUser && (
-                <span style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+                <span className="navbar-user">
                   {currentUser}
                 </span>
               )}
             </div>
           </div>
         </nav>
-        <div style={{ display: 'flex', flex: 1, minHeight: 'calc(100vh - 56px)' }}>
+        <div className="main-content-wrapper">
           {currentUser && path !== '/settings' && <WorkspaceTabs />}
-          <main style={{ flex: 1, padding: '32px 0', minWidth: 0 }}>
+          <main className="main-content-inner">
             <div className="container">{children}</div>
           </main>
         </div>

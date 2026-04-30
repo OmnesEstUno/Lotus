@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { parseISO } from 'date-fns';
 import { CustomDateRange, Transaction, UserCategories } from '../../types';
-import { TransactionUpdate } from '../../api/client';
+import type { TransactionUpdate } from '../../api/transactions';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 import YearSelector, { ALL_YEARS, CUSTOM_RANGE } from './YearSelector';
 import DateRangePicker from '../DateRangePicker';

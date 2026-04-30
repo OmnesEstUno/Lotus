@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useRef, useState } from 'react'
 import type { ReactNode } from 'react';
 import Modal from '../components/Modal';
 import DataEntry from '../pages/DataEntry';
+import { dialog } from '../utils/dialog';
 
 interface DataEntryContextValue {
   isOpen: boolean;
@@ -42,8 +43,8 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
     submittedListeners.current.forEach((fn) => fn());
   }, []);
 
-  const handleClose = useCallback(() => {
-    if (hasPending && !window.confirm('Discard pending changes?')) return;
+  const handleClose = useCallback(async () => {
+    if (hasPending && !await dialog.confirm('Discard pending changes?')) return;
     close();
   }, [hasPending, close]);
 

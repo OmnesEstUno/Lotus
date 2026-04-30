@@ -1,5 +1,6 @@
 import { useWorkspaces } from '../../hooks/useWorkspaces';
-import { createInstance } from '../../api/client';
+import { createInstance } from '../../api/instances';
+import { dialog } from '../../utils/dialog';
 
 export default function WorkspaceTabs() {
   const { instances, activeInstanceId, switchTo, refresh, loading } = useWorkspaces();
@@ -8,14 +9,14 @@ export default function WorkspaceTabs() {
   if (instances.length === 0) return null;
 
   async function handleAddWorkspace() {
-    const name = prompt('New workspace name:');
+    const name = await dialog.prompt('New workspace name:');
     if (!name?.trim()) return;
     try {
       const created = await createInstance(name.trim());
       await refresh();
       await switchTo(created.id);
     } catch (err) {
-      alert((err as Error).message);
+      await dialog.alert((err as Error).message);
     }
   }
 

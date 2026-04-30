@@ -16,25 +16,28 @@ import {
   verifyJWT,
   generateTOTPSecret,
   verifyTOTP,
-} from './crypto';
-import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './migrations';
-import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites';
+} from './auth/crypto';
+import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
+import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
+import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
   createWorkspaceInvite,
   verifyWorkspaceInvite,
   markWorkspaceInviteUsed,
   listWorkspaceInvites,
   deleteWorkspaceInvite,
-} from './workspace-invites';
+} from './invites/workspaceInvites';
 import {
   readAllYears,
+  readAllYearsWithVersion,
   readYears,
   writeAllYears,
   upsertInYear,
   updateInAnyYear,
   deleteFromAnyYear,
   yearOfISODate,
-} from './paginated';
+} from './storage/paginatedYearStorage';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS } from './constants';
 
 export interface Env {
   FINANCE_KV: KVNamespace;
@@ -54,6 +57,8 @@ interface Instance {
   owner: string;
   members: string[];
   createdAt: string;
+  /** Optimistic-concurrency version.  Missing on legacy records → treated as 0. */
+  version: number;
 }
 
 // ─── User profile type ────────────────────────────────────────────────────────
@@ -71,16 +76,13 @@ interface UserProfile {
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
 function corsHeaders(origin: string | null, allowedOrigin: string): Record<string, string> {
-  // Allow localhost for dev (any port) + the configured production origin
-  const isLocalhost = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  const matchesAllowed = origin && allowedOrigin && origin === allowedOrigin;
+  // Allow localhost for dev (any port) + the configured production origin.
+  // Default to empty string (not '*') so browsers reject unrecognised origins.
+  const isLocalhost = !!origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  const matchesAllowed = !!origin && !!allowedOrigin && origin === allowedOrigin;
 
-  let allowOrigin = '*';
-  if (isLocalhost || matchesAllowed) {
-    allowOrigin = origin!;
-  } else if (allowedOrigin) {
-    allowOrigin = allowedOrigin;
-  }
+  let allowOrigin = '';
+  if (isLocalhost || matchesAllowed) allowOrigin = origin!;
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
@@ -91,10 +93,21 @@ function corsHeaders(origin: string | null, allowedOrigin: string): Record<strin
   };
 }
 
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+};
+
 function respond(body: unknown, status: number, headers: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...SECURITY_HEADERS,
+      ...headers,
+    },
   });
 }
 
@@ -112,9 +125,19 @@ async function authenticate(request: Request, env: Env): Promise<AuthContext | n
   }
 }
 
-async function authenticateAdmin(request: Request, env: Env, cors: Record<string, string>): Promise<AuthContext | Response> {
+async function requireAuth(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<AuthContext | Response> {
   const auth = await authenticate(request, env);
   if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+  return auth;
+}
+
+async function authenticateAdmin(request: Request, env: Env, cors: Record<string, string>): Promise<AuthContext | Response> {
+  const auth = await requireAuth(request, env, cors);
+  if (auth instanceof Response) return auth;
   if (auth.username !== 'admin') return respond({ error: 'Forbidden' }, 403, cors);
   return auth;
 }
@@ -125,8 +148,8 @@ async function authenticateInstanceOwner(
   instanceId: string,
   cors: Record<string, string>,
 ): Promise<{ auth: AuthContext; inst: Instance } | Response> {
-  const auth = await authenticate(request, env);
-  if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+  const auth = await requireAuth(request, env, cors);
+  if (auth instanceof Response) return auth;
   const raw = await env.FINANCE_KV.get(instanceMetaKey(instanceId));
   if (!raw) return respond({ error: 'Not found.' }, 404, cors);
   const inst = JSON.parse(raw) as Instance;
@@ -151,10 +174,10 @@ async function addUsername(kv: KVNamespace, username: string): Promise<void> {
 // ─── KV key scoping ───────────────────────────────────────────────────────────
 
 const userKey = (username: string, leaf: 'profile' | 'data:transactions' | 'data:income' | 'data:userCategories') =>
-  `users:${username}:${leaf}`;
+  KV_PREFIXES.USER(username, leaf);
 
 const instanceKey = (instanceId: string, leaf: 'data:transactions' | 'data:income' | 'data:userCategories') =>
-  `instances:${instanceId}:${leaf}`;
+  KV_PREFIXES.INSTANCE_DATA(instanceId, leaf);
 
 // ─── User profile helpers ─────────────────────────────────────────────────────
 
@@ -202,6 +225,10 @@ async function getTransactions(kv: KVNamespace, instanceId: string): Promise<Tra
   return readAllYears<Transaction>(kv, instanceKey(instanceId, 'data:transactions'));
 }
 
+async function getTransactionsWithVersion(kv: KVNamespace, instanceId: string): Promise<{ items: Transaction[]; version: number }> {
+  return readAllYearsWithVersion<Transaction>(kv, instanceKey(instanceId, 'data:transactions'));
+}
+
 async function saveTransactions(kv: KVNamespace, instanceId: string, txns: Transaction[]): Promise<void> {
   return writeAllYears<Transaction>(kv, instanceKey(instanceId, 'data:transactions'), txns, (t) => yearOfISODate(t.date));
 }
@@ -210,8 +237,19 @@ async function getIncomeEntries(kv: KVNamespace, instanceId: string): Promise<In
   return readAllYears<IncomeEntry>(kv, instanceKey(instanceId, 'data:income'));
 }
 
+async function getIncomeEntriesWithVersion(kv: KVNamespace, instanceId: string): Promise<{ items: IncomeEntry[]; version: number }> {
+  return readAllYearsWithVersion<IncomeEntry>(kv, instanceKey(instanceId, 'data:income'));
+}
+
 async function saveIncomeEntries(kv: KVNamespace, instanceId: string, entries: IncomeEntry[]): Promise<void> {
   return writeAllYears<IncomeEntry>(kv, instanceKey(instanceId, 'data:income'), entries, (i) => yearOfISODate(i.date));
+}
+
+async function getUserCategoriesVersion(kv: KVNamespace, instanceId: string): Promise<number> {
+  const raw = await kv.get(instanceKey(instanceId, 'data:userCategories'));
+  if (!raw) return 0;
+  const data = JSON.parse(raw) as { version?: number };
+  return typeof data.version === 'number' ? data.version : 0;
 }
 
 function generateId(): string {
@@ -229,6 +267,41 @@ async function deletePaginatedSlice(kv: KVNamespace, prefix: string): Promise<vo
     await Promise.all(years.map((y) => kv.delete(`${prefix}:${y}`)));
     await kv.delete(`${prefix}:index`);
   }
+}
+
+/**
+ * Boilerplate wrapper for endpoints that mutate a versioned resource.
+ *
+ * Caller is responsible for ALL security decisions:
+ *  - Authentication  (JWT verify via requireAuth / authenticate)
+ *  - Authorization   (membership via resolveInstance, ownership, admin)
+ *  - Body schema validation (fields beyond expectedVersion)
+ *
+ * This helper handles ONLY concurrency control:
+ *  - Validates expectedVersion is a number  →  400 if not
+ *  - Reads the current version via readCurrent()
+ *  - Compares versions  →  409 with currentVersion if mismatch
+ *  - Calls operate(data, currentVersion) and returns its Response
+ *
+ * @param readCurrent  Async fn that returns { data, version }.  Pass `data: undefined`
+ *                     when the endpoint only needs the version (e.g. DELETE, in-place PUT).
+ * @param operate      Receives the data and currentVersion; responsible for performing
+ *                     the mutation, saving, and returning the final Response.
+ */
+async function mutateVersioned<T>(
+  cors: Record<string, string>,
+  expectedVersion: unknown,
+  readCurrent: () => Promise<{ data: T; version: number }>,
+  operate: (data: T, currentVersion: number) => Promise<Response>,
+): Promise<Response> {
+  if (typeof expectedVersion !== 'number') {
+    return respond({ error: 'expectedVersion required' }, 400, cors);
+  }
+  const { data, version: currentVersion } = await readCurrent();
+  if (expectedVersion !== currentVersion) {
+    return respond({ error: 'conflict', currentVersion }, 409, cors);
+  }
+  return operate(data, currentVersion);
 }
 
 /**
@@ -260,7 +333,7 @@ export default {
     const path = url.pathname;
     const method = request.method;
     const origin = request.headers.get('Origin');
-    const cors = corsHeaders(origin, env.ALLOWED_ORIGIN ?? '*');
+    const cors = corsHeaders(origin, env.ALLOWED_ORIGIN ?? '');
 
     // CORS preflight
     if (method === 'OPTIONS') {
@@ -413,16 +486,29 @@ export default {
         };
         await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
 
-        return respond({ totpSecret, username }, 200, cors);
+        const setupTokenId = crypto.randomUUID();
+        await env.FINANCE_KV.put(
+          `setup-token:${setupTokenId}`,
+          JSON.stringify({ username, inviteId: invite.id }),
+          { expirationTtl: 90 },
+        );
+        return respond({ totpSecret, username, setupToken: setupTokenId }, 200, cors);
       }
 
       // ── Confirm TOTP Setup ──
-      // TODO: consider tying init→confirm with a short-lived token for anti-race hardening.
-      //       Currently any caller who knows the username can attempt confirm; TOTP codes
-      //       rotate every 30s which limits the window, but a pre-auth token would close it.
       if (path === '/api/setup/confirm' && method === 'POST') {
-        const body = await request.json() as { username?: string; totpCode?: string };
+        const body = await request.json() as { username?: string; totpCode?: string; setupToken?: string };
+        const { setupToken } = body;
+        if (!setupToken || typeof setupToken !== 'string') {
+          return respond({ error: 'Missing setup token.' }, 400, cors);
+        }
+        const tokRaw = await env.FINANCE_KV.get(`setup-token:${setupToken}`);
+        if (!tokRaw) return respond({ error: 'Setup token expired. Please retry from invite link.' }, 400, cors);
+        const tok = JSON.parse(tokRaw) as { username: string; inviteId: string };
         const username = (body.username ?? '').trim().toLowerCase();
+        if (tok.username !== username) {
+          return respond({ error: 'Token does not match username.' }, 400, cors);
+        }
         const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
         if (!raw) return respond({ error: 'Setup not started for this user.' }, 400, cors);
         const profile = JSON.parse(raw) as { totpSecret: string; confirmed: boolean };
@@ -449,6 +535,7 @@ export default {
         await addUsername(env.FINANCE_KV, username);
         await env.FINANCE_KV.put('meta:initialized', 'true');
 
+        await env.FINANCE_KV.delete(`setup-token:${setupToken}`);
         return respond({ ok: true }, 200, cors);
       }
 
@@ -457,6 +544,13 @@ export default {
         const body = await request.json() as { username?: string; password?: string };
         const username = (body.username ?? '').trim().toLowerCase();
         if (!username || !body.password) return respond({ error: 'Invalid credentials.' }, 401, cors);
+
+        // Rate-limit before any KV reads — covers both "user not found" and "wrong password" paths.
+        const limitKey = KV_PREFIXES.RATELIMIT_LOGIN(username);
+        const rl = await checkAndIncrement(env.FINANCE_KV, limitKey, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS);
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${Math.ceil(rl.remainingSeconds / 60)} minute(s).` }, 429, cors);
+        }
 
         const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
         if (!raw) {
@@ -470,13 +564,16 @@ export default {
         const valid = await verifyPassword(body.password, profile.passwordHash);
         if (!valid) return respond({ error: 'Invalid credentials.' }, 401, cors);
 
+        // Clear rate-limit counter on successful password verification.
+        await clearRateLimit(env.FINANCE_KV, limitKey);
+
         const preAuthId = crypto.randomUUID();
         const preAuthToken = await signJWT(
-          { preAuth: true, id: preAuthId, username, exp: Math.floor(Date.now() / 1000) + 300 },
+          { preAuth: true, id: preAuthId, username, exp: Math.floor(Date.now() / 1000) + PREAUTH_TTL_SECONDS },
           env.JWT_SECRET,
         );
 
-        await env.FINANCE_KV.put(`preauth:${preAuthId}`, username, { expirationTtl: 300 });
+        await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), username, { expirationTtl: PREAUTH_TTL_SECONDS });
         return respond({ preAuthToken }, 200, cors);
       }
 
@@ -499,8 +596,16 @@ export default {
         }
 
         const username = payload.username;
-        const stored = await env.FINANCE_KV.get(`preauth:${payload.id}`);
+        const preAuthId = payload.id;
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PREAUTH(preAuthId));
         if (stored !== username) return respond({ error: 'Session expired.' }, 401, cors);
+
+        // Rate-limit by preauth token ID before checking the TOTP code.
+        const totpLimitKey = KV_PREFIXES.RATELIMIT_TOTP(preAuthId);
+        const totpRl = await checkAndIncrement(env.FINANCE_KV, totpLimitKey, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS);
+        if (!totpRl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${totpRl.remainingSeconds} second(s).` }, 429, cors);
+        }
 
         const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
         if (!raw) return respond({ error: 'User not found.' }, 401, cors);
@@ -509,10 +614,12 @@ export default {
         const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
         if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
 
-        await env.FINANCE_KV.delete(`preauth:${payload.id}`);
+        // Clear rate-limit and preauth token on success.
+        await clearRateLimit(env.FINANCE_KV, totpLimitKey);
+        await env.FINANCE_KV.delete(KV_PREFIXES.PREAUTH(preAuthId));
 
         const token = await signJWT(
-          { authenticated: true, username, exp: Math.floor(Date.now() / 1000) + 86400 * 7 },
+          { authenticated: true, username, exp: Math.floor(Date.now() / 1000) + JWT_TTL_SECONDS },
           env.JWT_SECRET,
         );
 
@@ -548,8 +655,8 @@ export default {
       // ─────────────────────────────────────────────────────────────────────
       // Protected routes — require valid JWT
       // ─────────────────────────────────────────────────────────────────────
-      const auth = await authenticate(request, env);
-      if (!auth) return respond({ error: 'Unauthorized' }, 401, cors);
+      const auth = await requireAuth(request, env, cors);
+      if (auth instanceof Response) return auth;
 
       const { username } = auth;
 
@@ -562,7 +669,12 @@ export default {
         const instances: Instance[] = [];
         for (const id of profile.instanceIds ?? []) {
           const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
-          if (raw) instances.push(JSON.parse(raw) as Instance);
+          if (raw) {
+            const inst = JSON.parse(raw) as Instance;
+            // Default missing version to 0 for legacy records
+            inst.version = inst.version ?? 0;
+            instances.push(inst);
+          }
         }
         return respond({ instances, activeInstanceId: profile.activeInstanceId ?? null }, 200, cors);
       }
@@ -573,7 +685,7 @@ export default {
         const name = (body.name ?? '').trim();
         if (!name) return respond({ error: 'Name required.' }, 400, cors);
         const id = crypto.randomUUID();
-        const instance: Instance = { id, name, owner: username, members: [username], createdAt: new Date().toISOString() };
+        const instance: Instance = { id, name, owner: username, members: [username], createdAt: new Date().toISOString(), version: 1 };
         await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(instance));
         const profile = await getUserProfile(env.FINANCE_KV, username);
         if (!profile) return respond({ error: 'User profile not found.' }, 500, cors);
@@ -609,19 +721,28 @@ export default {
         // Rename instance
         if ((m = path.match(/^\/api\/instances\/([^/]+)$/)) && method === 'PUT') {
           const id = m[1];
-          const body = await request.json() as { name?: string };
+          const body = await request.json() as { name?: string; expectedVersion?: number };
           const trimmed = (body.name ?? '').trim();
           if (!trimmed) return respond({ error: 'Name required.' }, 400, cors);
+          if (typeof body.expectedVersion !== 'number') return respond({ error: 'expectedVersion (number) required.' }, 400, cors);
           const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (!raw) return respond({ error: 'Not found.' }, 404, cors);
           const inst = JSON.parse(raw) as Instance;
           if (inst.owner !== username) return respond({ error: 'Only the owner can rename.' }, 403, cors);
+          const currentVersion = inst.version ?? 0;
+          if (body.expectedVersion !== currentVersion) {
+            return respond({ error: 'Conflict: instance was modified by another request.', currentVersion }, 409, cors);
+          }
           inst.name = trimmed;
+          inst.version = currentVersion + 1;
           await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
           return respond(inst, 200, cors);
         }
 
-        // Delete instance (owner only; removes data too)
+        // Delete instance (owner only; removes data too).
+        // EXEMPT from optimistic-concurrency: only the owner can delete, so a
+        // double-click race from two tabs results in the second call getting a 404
+        // — no silent data corruption is possible.
         if ((m = path.match(/^\/api\/instances\/([^/]+)$/)) && method === 'DELETE') {
           const id = m[1];
           const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
@@ -662,6 +783,10 @@ export default {
         if ((m = path.match(/^\/api\/instances\/([^/]+)\/members\/([^/]+)$/)) && method === 'DELETE') {
           const id = m[1];
           const memberToRemove = m[2].toLowerCase();
+          const evParam = url.searchParams.get('expectedVersion');
+          if (evParam === null) return respond({ error: 'expectedVersion query parameter required.' }, 400, cors);
+          const expectedVersion = Number(evParam);
+          if (!Number.isFinite(expectedVersion)) return respond({ error: 'expectedVersion must be a number.' }, 400, cors);
           const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
           if (!raw) return respond({ error: 'Not found.' }, 404, cors);
           const inst = JSON.parse(raw) as Instance;
@@ -669,7 +794,12 @@ export default {
           const isSelfRemoval = username === memberToRemove;
           if (!isOwner && !isSelfRemoval) return respond({ error: 'Only the owner can modify members.' }, 403, cors);
           if (inst.owner === memberToRemove) return respond({ error: 'Cannot remove the owner.' }, 400, cors);
+          const currentVersion = inst.version ?? 0;
+          if (expectedVersion !== currentVersion) {
+            return respond({ error: 'Conflict: instance was modified by another request.', currentVersion }, 409, cors);
+          }
           inst.members = inst.members.filter((u) => u !== memberToRemove);
+          inst.version = currentVersion + 1;
           await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
           const p = await getUserProfile(env.FINANCE_KV, memberToRemove);
           if (!p) return respond({ error: 'Member profile not found.' }, 500, cors);
@@ -682,7 +812,11 @@ export default {
 
       // ── Workspace Invite endpoints ──
 
-      // Accept workspace invite (any authenticated user)
+      // Accept workspace invite (any authenticated user).
+      // EXEMPT from optimistic-concurrency: the invite token itself proves
+      // authorization.  The accepting user has no prior read of the workspace
+      // (and no version to supply), and an "already a member" guard prevents
+      // duplicate-accept races from corrupting the members list.
       if (path === '/api/instances/invites/accept' && method === 'POST') {
         const body = await request.json() as { token?: string };
         const token = (body.token ?? '').trim();
@@ -695,6 +829,7 @@ export default {
         const inst = JSON.parse(instRaw) as Instance;
         if (inst.members.includes(auth.username)) return respond({ error: 'Already a member.' }, 400, cors);
         inst.members.push(auth.username);
+        inst.version = (inst.version ?? 0) + 1;
         await env.FINANCE_KV.put(instanceMetaKey(record.instanceId), JSON.stringify(inst));
         const memberProfile = await getUserProfile(env.FINANCE_KV, auth.username);
         if (!memberProfile) return respond({ error: 'User profile not found.' }, 500, cors);
@@ -715,6 +850,7 @@ export default {
         const instRaw = await env.FINANCE_KV.get(instanceMetaKey(record.instanceId));
         if (!instRaw) return respond({ error: 'Workspace no longer exists.' }, 404, cors);
         const inst = JSON.parse(instRaw) as Instance;
+        // Members array intentionally omitted to prevent membership-roster leak via invite token.
         return respond({
           instanceName: inst.name,
           ownerUsername: inst.owner,
@@ -812,20 +948,34 @@ export default {
       if (path === '/api/transactions' && method === 'GET') {
         const yearParam = url.searchParams.get('year');
         const prefix = instanceKey(instanceId, 'data:transactions');
-        const txns = yearParam
-          ? await readYears<Transaction>(env.FINANCE_KV, prefix, [Number(yearParam)])
-          : await readAllYears<Transaction>(env.FINANCE_KV, prefix);
-        return respond({ transactions: txns }, 200, cors);
+        if (yearParam) {
+          // Year-scoped read: return items from that shard only.
+          // Version still comes from the index so the client always has a consistent version.
+          const { version } = await readAllYearsWithVersion<Transaction>(env.FINANCE_KV, prefix);
+          const txns = await readYears<Transaction>(env.FINANCE_KV, prefix, [Number(yearParam)]);
+          return respond({ transactions: txns, version }, 200, cors);
+        }
+        const { items: txns, version } = await readAllYearsWithVersion<Transaction>(env.FINANCE_KV, prefix);
+        return respond({ transactions: txns, version }, 200, cors);
       }
 
       // ── POST transactions (batch) ──
       if (path === '/api/transactions' && method === 'POST') {
-        const body = await request.json() as { transactions?: Omit<Transaction, 'id'>[] };
+        const body = await request.json() as { transactions?: Omit<Transaction, 'id'>[]; expectedVersion?: number };
+        if (typeof body.expectedVersion !== 'number') {
+          return respond({ error: 'expectedVersion required' }, 400, cors);
+        }
         if (!Array.isArray(body.transactions) || body.transactions.length === 0) {
           return respond({ error: 'No transactions provided.' }, 400, cors);
         }
+        if (body.transactions.length > MAX_BATCH_SIZE) {
+          return respond({ error: `Batch exceeds maximum of ${MAX_BATCH_SIZE}.` }, 413, cors);
+        }
 
-        const existing = await getTransactions(env.FINANCE_KV, instanceId);
+        const { items: existing, version: currentVersion } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedVersion !== currentVersion) {
+          return respond({ error: 'conflict', currentVersion }, 409, cors);
+        }
 
         // Dedup: match on date + normalized description + rounded amount
         // against existing rows + previously-accepted rows in this same batch.
@@ -864,13 +1014,21 @@ export default {
           return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
         }
         const id = txnDeleteMatch[1];
-        const ok = await deleteFromAnyYear<Transaction>(
-          env.FINANCE_KV,
-          instanceKey(instanceId, 'data:transactions'),
-          id,
+        const delBody = await request.json().catch(() => ({})) as { expectedVersion?: number };
+        return mutateVersioned(
+          cors,
+          delBody.expectedVersion,
+          () => getTransactionsWithVersion(env.FINANCE_KV, instanceId).then(({ version }) => ({ data: undefined, version })),
+          async () => {
+            const ok = await deleteFromAnyYear<Transaction>(
+              env.FINANCE_KV,
+              instanceKey(instanceId, 'data:transactions'),
+              id,
+            );
+            if (!ok) return respond({ error: 'Transaction not found.' }, 404, cors);
+            return respond({ ok: true }, 200, cors);
+          },
         );
-        if (!ok) return respond({ error: 'Transaction not found.' }, 404, cors);
-        return respond({ ok: true }, 200, cors);
       }
 
       // ── PUT transaction (update editable fields in place) ──
@@ -884,6 +1042,7 @@ export default {
           amount?: number;
           notes?: string;
           archived?: boolean;
+          expectedVersion?: number;
         };
         // Build only the fields explicitly provided so updateInAnyYear merges correctly.
         const patch: Partial<Transaction> = {};
@@ -894,35 +1053,52 @@ export default {
         if (typeof body.notes === 'string') patch.notes = body.notes;
         if (typeof body.archived === 'boolean') patch.archived = body.archived;
 
-        const updated = await updateInAnyYear<Transaction>(
-          env.FINANCE_KV,
-          instanceKey(instanceId, 'data:transactions'),
-          id,
-          patch,
+        return mutateVersioned(
+          cors,
+          body.expectedVersion,
+          () => getTransactionsWithVersion(env.FINANCE_KV, instanceId).then(({ version }) => ({ data: undefined, version })),
+          async () => {
+            const updated = await updateInAnyYear<Transaction>(
+              env.FINANCE_KV,
+              instanceKey(instanceId, 'data:transactions'),
+              id,
+              patch,
+            );
+            if (!updated) return respond({ error: 'Transaction not found.' }, 404, cors);
+            return respond(updated, 200, cors);
+          },
         );
-        if (!updated) return respond({ error: 'Transaction not found.' }, 404, cors);
-        return respond(updated, 200, cors);
       }
 
       // ── GET income ──
       if (path === '/api/income' && method === 'GET') {
         const yearParam = url.searchParams.get('year');
         const prefix = instanceKey(instanceId, 'data:income');
-        const entries = yearParam
-          ? await readYears<IncomeEntry>(env.FINANCE_KV, prefix, [Number(yearParam)])
-          : await readAllYears<IncomeEntry>(env.FINANCE_KV, prefix);
-        return respond({ income: entries }, 200, cors);
+        if (yearParam) {
+          const { version } = await readAllYearsWithVersion<IncomeEntry>(env.FINANCE_KV, prefix);
+          const entries = await readYears<IncomeEntry>(env.FINANCE_KV, prefix, [Number(yearParam)]);
+          return respond({ income: entries, version }, 200, cors);
+        }
+        const { items: entries, version } = await readAllYearsWithVersion<IncomeEntry>(env.FINANCE_KV, prefix);
+        return respond({ income: entries, version }, 200, cors);
       }
 
       // ── POST income ──
       if (path === '/api/income' && method === 'POST') {
         const body = await request.json() as {
           entry?: Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean };
+          expectedVersion?: number;
         };
+        if (typeof body.expectedVersion !== 'number') {
+          return respond({ error: 'expectedVersion required' }, 400, cors);
+        }
         if (!body.entry) return respond({ error: 'No entry provided.' }, 400, cors);
 
         const { allowDuplicate, ...rawEntry } = body.entry;
-        const existing = await getIncomeEntries(env.FINANCE_KV, instanceId);
+        const { items: existing, version: currentIncomeVersion } = await getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedVersion !== currentIncomeVersion) {
+          return respond({ error: 'conflict', currentVersion: currentIncomeVersion }, 409, cors);
+        }
 
         // Dedup against existing income entries on date + description + netAmount
         // unless the caller explicitly opted to allow a duplicate.
@@ -993,13 +1169,21 @@ export default {
           return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
         }
         const id = incDeleteMatch[1];
-        const ok = await deleteFromAnyYear<IncomeEntry>(
-          env.FINANCE_KV,
-          instanceKey(instanceId, 'data:income'),
-          id,
+        const delIncBody = await request.json().catch(() => ({})) as { expectedVersion?: number };
+        return mutateVersioned(
+          cors,
+          delIncBody.expectedVersion,
+          () => getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId).then(({ version }) => ({ data: undefined, version })),
+          async () => {
+            const ok = await deleteFromAnyYear<IncomeEntry>(
+              env.FINANCE_KV,
+              instanceKey(instanceId, 'data:income'),
+              id,
+            );
+            if (!ok) return respond({ error: 'Income entry not found.' }, 404, cors);
+            return respond({ ok: true }, 200, cors);
+          },
         );
-        if (!ok) return respond({ error: 'Income entry not found.' }, 404, cors);
-        return respond({ ok: true }, 200, cors);
       }
 
       // ── PUT income (update editable fields in place) ──
@@ -1011,6 +1195,7 @@ export default {
           description?: string;
           grossAmount?: number;
           netAmount?: number;
+          expectedVersion?: number;
         };
         // Build only the fields explicitly provided so updateInAnyYear merges correctly.
         const patch: Partial<IncomeEntry> = {};
@@ -1019,20 +1204,28 @@ export default {
         if (typeof body.grossAmount === 'number' && !isNaN(body.grossAmount)) patch.grossAmount = body.grossAmount;
         if (typeof body.netAmount === 'number' && !isNaN(body.netAmount)) patch.netAmount = body.netAmount;
 
-        const updated = await updateInAnyYear<IncomeEntry>(
-          env.FINANCE_KV,
-          instanceKey(instanceId, 'data:income'),
-          id,
-          patch,
+        return mutateVersioned(
+          cors,
+          body.expectedVersion,
+          () => getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId).then(({ version }) => ({ data: undefined, version })),
+          async () => {
+            const updated = await updateInAnyYear<IncomeEntry>(
+              env.FINANCE_KV,
+              instanceKey(instanceId, 'data:income'),
+              id,
+              patch,
+            );
+            if (!updated) return respond({ error: 'Income entry not found.' }, 404, cors);
+            return respond(updated, 200, cors);
+          },
         );
-        if (!updated) return respond({ error: 'Income entry not found.' }, 404, cors);
-        return respond(updated, 200, cors);
       }
 
       // ── GET user categories (custom categories + description mappings) ──
       if (path === '/api/user-categories' && method === 'GET') {
         const raw = await env.FINANCE_KV.get(instanceKey(instanceId, 'data:userCategories'));
-        const data = raw ? JSON.parse(raw) : { customCategories: [], mappings: [] };
+        const data = raw ? JSON.parse(raw) : { customCategories: [], mappings: [], version: 0 };
+        if (typeof data.version !== 'number') data.version = 0;
         return respond(data, 200, cors);
       }
 
@@ -1041,7 +1234,14 @@ export default {
         const body = await request.json() as {
           customCategories?: string[];
           mappings?: Array<{ pattern: string; category: string }>;
+          expectedVersion?: number;
         };
+        if (Array.isArray(body.customCategories) && body.customCategories.length > MAX_BATCH_SIZE) {
+          return respond({ error: `Batch exceeds maximum of ${MAX_BATCH_SIZE}.` }, 413, cors);
+        }
+        if (Array.isArray(body.mappings) && body.mappings.length > MAX_BATCH_SIZE) {
+          return respond({ error: `Batch exceeds maximum of ${MAX_BATCH_SIZE}.` }, 413, cors);
+        }
         const customCategories = Array.isArray(body.customCategories)
           ? body.customCategories.filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
           : [];
@@ -1052,11 +1252,23 @@ export default {
                 typeof m.category === 'string' && m.category.trim().length > 0,
             )
           : [];
-        await env.FINANCE_KV.put(
-          instanceKey(instanceId, 'data:userCategories'),
-          JSON.stringify({ customCategories, mappings }),
+        return mutateVersioned(
+          cors,
+          body.expectedVersion,
+          async () => {
+            const prevRaw = await env.FINANCE_KV.get(instanceKey(instanceId, 'data:userCategories'));
+            const prevData = prevRaw ? JSON.parse(prevRaw) : { version: 0 };
+            const version: number = typeof prevData.version === 'number' ? prevData.version : 0;
+            return { data: undefined, version };
+          },
+          async (_data, currentVersion) => {
+            await env.FINANCE_KV.put(
+              instanceKey(instanceId, 'data:userCategories'),
+              JSON.stringify({ customCategories, mappings, version: currentVersion + 1 }),
+            );
+            return respond({ ok: true }, 200, cors);
+          },
         );
-        return respond({ ok: true }, 200, cors);
       }
 
       // ── POST bulk delete (transactions + income in one call) ──
@@ -1064,7 +1276,26 @@ export default {
         if (instance.owner !== auth.username) {
           return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
         }
-        const body = await request.json() as { transactionIds?: string[]; incomeIds?: string[] };
+        const body = await request.json() as {
+          transactionIds?: string[];
+          incomeIds?: string[];
+          expectedTransactionsVersion?: number;
+          expectedIncomeVersion?: number;
+        };
+        const willTouchTxns = Array.isArray(body.transactionIds) && body.transactionIds.length > 0;
+        const willTouchInc = Array.isArray(body.incomeIds) && body.incomeIds.length > 0;
+        if (willTouchTxns && typeof body.expectedTransactionsVersion !== 'number') {
+          return respond({ error: 'expectedTransactionsVersion required when deleting transactions' }, 400, cors);
+        }
+        if (willTouchInc && typeof body.expectedIncomeVersion !== 'number') {
+          return respond({ error: 'expectedIncomeVersion required when deleting income entries' }, 400, cors);
+        }
+        if (Array.isArray(body.transactionIds) && body.transactionIds.length > MAX_BULK_IDS) {
+          return respond({ error: `Batch exceeds maximum of ${MAX_BULK_IDS}.` }, 413, cors);
+        }
+        if (Array.isArray(body.incomeIds) && body.incomeIds.length > MAX_BULK_IDS) {
+          return respond({ error: `Batch exceeds maximum of ${MAX_BULK_IDS}.` }, 413, cors);
+        }
         const txnIds = new Set(Array.isArray(body.transactionIds) ? body.transactionIds : []);
         const incIds = new Set(Array.isArray(body.incomeIds) ? body.incomeIds : []);
 
@@ -1072,7 +1303,10 @@ export default {
         let deletedIncome = 0;
 
         if (txnIds.size > 0) {
-          const existing = await getTransactions(env.FINANCE_KV, instanceId);
+          const { items: existing, version: currentTxnVersion } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+          if (body.expectedTransactionsVersion !== currentTxnVersion) {
+            return respond({ error: 'conflict', currentVersion: currentTxnVersion }, 409, cors);
+          }
           const next = existing.filter((t) => !txnIds.has(t.id));
           deletedTransactions = existing.length - next.length;
           if (deletedTransactions > 0) {
@@ -1081,7 +1315,10 @@ export default {
         }
 
         if (incIds.size > 0) {
-          const existing = await getIncomeEntries(env.FINANCE_KV, instanceId);
+          const { items: existing, version: currentIncVersion } = await getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId);
+          if (body.expectedIncomeVersion !== currentIncVersion) {
+            return respond({ error: 'conflict', currentVersion: currentIncVersion }, 409, cors);
+          }
           const next = existing.filter((e) => !incIds.has(e.id));
           deletedIncome = existing.length - next.length;
           if (deletedIncome > 0) {
@@ -1110,38 +1347,53 @@ export default {
 
       // ── POST bulk update category for transactions matching a description pattern ──
       if (path === '/api/transactions/bulk-update-category' && method === 'POST') {
-        const body = await request.json() as { newCategory?: string; pattern?: string; previousCategory?: string };
+        const body = await request.json() as { newCategory?: string; pattern?: string; previousCategory?: string; expectedVersion?: number };
         const newCategory = (body.newCategory ?? '').trim();
         const pattern = (body.pattern ?? '').trim();
         if (!newCategory || !pattern) return respond({ error: 'newCategory and pattern are required.' }, 400, cors);
-        const txns = await getTransactions(env.FINANCE_KV, instanceId);
-        const patternLower = pattern.toLowerCase();
-        let updated = 0;
-        const next = txns.map((t) => {
-          if (t.type !== 'expense') return t;
-          if (t.archived) return t;
-          // Only retarget rows that were in the previous category (if specified) so an
-          // accidental broad pattern doesn't overwrite intentionally-different categorizations.
-          if (body.previousCategory && t.category !== body.previousCategory) return t;
-          if (!t.description.toLowerCase().includes(patternLower)) return t;
-          if (t.category === newCategory) return t;
-          updated++;
-          return { ...t, category: newCategory };
-        });
-        if (updated > 0) await saveTransactions(env.FINANCE_KV, instanceId, next);
-        return respond({ updated }, 200, cors);
+        return mutateVersioned<Transaction[]>(
+          cors,
+          body.expectedVersion,
+          () => getTransactionsWithVersion(env.FINANCE_KV, instanceId).then(({ items, version }) => ({ data: items, version })),
+          async (txns) => {
+            const patternLower = pattern.toLowerCase();
+            let updated = 0;
+            const next = txns.map((t) => {
+              if (t.type !== 'expense') return t;
+              if (t.archived) return t;
+              // Only retarget rows that were in the previous category (if specified) so an
+              // accidental broad pattern doesn't overwrite intentionally-different categorizations.
+              if (body.previousCategory && t.category !== body.previousCategory) return t;
+              if (!t.description.toLowerCase().includes(patternLower)) return t;
+              if (t.category === newCategory) return t;
+              updated++;
+              return { ...t, category: newCategory };
+            });
+            if (updated > 0) await saveTransactions(env.FINANCE_KV, instanceId, next);
+            return respond({ updated }, 200, cors);
+          },
+        );
       }
 
       // ── POST rename category (cascades through transactions, mappings, custom list) ──
       if (path === '/api/rename-category' && method === 'POST') {
-        const body = await request.json() as { from?: string; to?: string };
+        const body = await request.json() as { from?: string; to?: string; expectedTransactionsVersion?: number; expectedUserCategoriesVersion?: number };
+        if (typeof body.expectedTransactionsVersion !== 'number') {
+          return respond({ error: 'expectedTransactionsVersion required' }, 400, cors);
+        }
+        if (typeof body.expectedUserCategoriesVersion !== 'number') {
+          return respond({ error: 'expectedUserCategoriesVersion required' }, 400, cors);
+        }
         const from = (body.from ?? '').trim();
         const to = (body.to ?? '').trim();
         if (!from || !to) return respond({ error: 'Both "from" and "to" are required.' }, 400, cors);
         if (from === to) return respond({ updated: 0 }, 200, cors);
 
         // Update transactions
-        const txns = await getTransactions(env.FINANCE_KV, instanceId);
+        const { items: txns, version: currentTxnVersion } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedTransactionsVersion !== currentTxnVersion) {
+          return respond({ error: 'conflict', currentVersion: currentTxnVersion }, 409, cors);
+        }
         let txnUpdates = 0;
         const nextTxns = txns.map((t) => {
           if (t.category === from) {
@@ -1154,7 +1406,11 @@ export default {
 
         // Update user categories document
         const raw = await env.FINANCE_KV.get(instanceKey(instanceId, 'data:userCategories'));
-        const userCats = raw ? JSON.parse(raw) as { customCategories: string[]; mappings: Array<{ pattern: string; category: string }> } : { customCategories: [], mappings: [] };
+        const userCats = raw ? JSON.parse(raw) as { customCategories: string[]; mappings: Array<{ pattern: string; category: string }>; version?: number } : { customCategories: [], mappings: [], version: 0 };
+        const userCatsVersion = typeof userCats.version === 'number' ? userCats.version : 0;
+        if (body.expectedUserCategoriesVersion !== userCatsVersion) {
+          return respond({ error: 'conflict', currentVersion: userCatsVersion }, 409, cors);
+        }
 
         // Rename in customCategories list (if the old name was a custom one)
         const wasCustom = userCats.customCategories.includes(from);
@@ -1175,7 +1431,7 @@ export default {
           return m;
         });
 
-        await env.FINANCE_KV.put(instanceKey(instanceId, 'data:userCategories'), JSON.stringify(userCats));
+        await env.FINANCE_KV.put(instanceKey(instanceId, 'data:userCategories'), JSON.stringify({ ...userCats, version: userCatsVersion + 1 }));
 
         return respond({ updated: txnUpdates, mappingsUpdated: mappingUpdates }, 200, cors);
       }
@@ -1185,13 +1441,22 @@ export default {
         if (instance.owner !== auth.username) {
           return respond({ error: 'Only the workspace owner can delete data.' }, 403, cors);
         }
-        const body = await request.json() as { name?: string; reassignTo?: string };
+        const body = await request.json() as { name?: string; reassignTo?: string; expectedTransactionsVersion?: number; expectedUserCategoriesVersion?: number };
+        if (typeof body.expectedTransactionsVersion !== 'number') {
+          return respond({ error: 'expectedTransactionsVersion required' }, 400, cors);
+        }
+        if (typeof body.expectedUserCategoriesVersion !== 'number') {
+          return respond({ error: 'expectedUserCategoriesVersion required' }, 400, cors);
+        }
         const name = (body.name ?? '').trim();
         const reassignTo = (body.reassignTo ?? 'Other').trim() || 'Other';
         if (!name) return respond({ error: 'Missing category name.' }, 400, cors);
 
         // Reassign transactions
-        const txns = await getTransactions(env.FINANCE_KV, instanceId);
+        const { items: txns, version: currentTxnVersionDel } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedTransactionsVersion !== currentTxnVersionDel) {
+          return respond({ error: 'conflict', currentVersion: currentTxnVersionDel }, 409, cors);
+        }
         let txnUpdates = 0;
         const nextTxns = txns.map((t) => {
           if (t.category === name) {
@@ -1204,12 +1469,16 @@ export default {
 
         // Remove from custom list + drop any mappings that pointed at this category
         const raw = await env.FINANCE_KV.get(instanceKey(instanceId, 'data:userCategories'));
-        const userCats = raw ? JSON.parse(raw) as { customCategories: string[]; mappings: Array<{ pattern: string; category: string }> } : { customCategories: [], mappings: [] };
+        const userCats = raw ? JSON.parse(raw) as { customCategories: string[]; mappings: Array<{ pattern: string; category: string }>; version?: number } : { customCategories: [], mappings: [], version: 0 };
+        const deleteCatVersion = typeof userCats.version === 'number' ? userCats.version : 0;
+        if (body.expectedUserCategoriesVersion !== deleteCatVersion) {
+          return respond({ error: 'conflict', currentVersion: deleteCatVersion }, 409, cors);
+        }
         userCats.customCategories = userCats.customCategories.filter((c) => c !== name);
         const mappingsBefore = userCats.mappings.length;
         userCats.mappings = userCats.mappings.filter((m) => m.category !== name);
         const mappingsRemoved = mappingsBefore - userCats.mappings.length;
-        await env.FINANCE_KV.put(instanceKey(instanceId, 'data:userCategories'), JSON.stringify(userCats));
+        await env.FINANCE_KV.put(instanceKey(instanceId, 'data:userCategories'), JSON.stringify({ ...userCats, version: deleteCatVersion + 1 }));
 
         return respond({ reassigned: txnUpdates, mappingsRemoved }, 200, cors);
       }

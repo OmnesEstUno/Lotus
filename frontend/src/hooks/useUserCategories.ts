@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { UserCategories, CategoryMapping, Category, BUILT_IN_CATEGORIES } from '../types';
-import { getUserCategories, saveUserCategories } from '../api/client';
-import { derivePattern } from '../utils/categories';
+import { getUserCategories, saveUserCategories } from '../api/categories';
+import { ConflictError } from '../api/core';
+import { derivePattern } from '../utils/categorization/rules';
 
 /**
  * Hook that loads the user's custom categories + mappings from the server
@@ -16,6 +17,7 @@ export function useUserCategories() {
     customCategories: [],
     mappings: [],
   });
+  const [saveError, setSaveError] = useState<string | null>(null);
   const loaded = useRef(false);
 
   useEffect(() => {
@@ -31,8 +33,25 @@ export function useUserCategories() {
 
   useEffect(() => {
     if (!loaded.current) return;
-    saveUserCategories(userCategories).catch((err) => {
-      console.error('Failed to save user categories', err);
+    saveUserCategories(userCategories).catch(async (err) => {
+      if (err instanceof ConflictError) {
+        // Refresh our local copy from the server so the version map is updated,
+        // then retry the save with the fresh version.
+        console.warn('User categories conflict detected; refreshing and retrying.');
+        try {
+          const fresh = await getUserCategories();
+          // Merge: prefer the in-memory changes over the server state for
+          // customCategories and mappings — caller's intent wins.
+          await saveUserCategories({ ...fresh, customCategories: userCategories.customCategories, mappings: userCategories.mappings });
+          setSaveError(null);
+        } catch (retryErr) {
+          console.error('Failed to save user categories after conflict retry', retryErr);
+          setSaveError('Your category changes could not be saved. Please refresh and try again.');
+        }
+      } else {
+        console.error('Failed to save user categories', err);
+        setSaveError('Your category changes could not be saved. Please refresh and try again.');
+      }
     });
   }, [userCategories]);
 
@@ -88,5 +107,6 @@ export function useUserCategories() {
     setUserCategories,
     addCustomCategory,
     saveMapping,
+    saveError,
   };
 }

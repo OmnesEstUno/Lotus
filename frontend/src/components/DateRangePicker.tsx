@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import DatePicker from 'react-datepicker';
 import { format, parseISO } from 'date-fns';
 import { CustomDateRange } from '../types';
+import { MONTH_NAMES_SHORT } from '../utils/dateConstants';
+import { YEAR_LOOKBACK, YEAR_LOOKFORWARD } from '../utils/constants';
 
 interface DateRangePickerProps {
   value: CustomDateRange | null;
@@ -12,8 +14,6 @@ interface DateRangePickerProps {
 
 const toISO = (d: Date) => format(d, 'yyyy-MM-dd');
 const fromISO = (s: string | null | undefined) => (s ? parseISO(s) : null);
-
-const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // Renders a custom header for react-datepicker that limits the month and
 // year <select> dropdowns to only values inside [min, max]. Without this
@@ -38,8 +38,8 @@ function CustomHeader({
   const viewedYear = date.getFullYear();
   const viewedMonth = date.getMonth();
 
-  const minYear = min ? min.getFullYear() : viewedYear - 10;
-  const maxYear = max ? max.getFullYear() : viewedYear + 10;
+  const minYear = min ? min.getFullYear() : viewedYear - YEAR_LOOKBACK;
+  const maxYear = max ? max.getFullYear() : viewedYear + YEAR_LOOKFORWARD;
   const years: number[] = [];
   for (let y = minYear; y <= maxYear; y++) years.push(y);
 
@@ -70,7 +70,7 @@ function CustomHeader({
           onChange={(e) => changeMonth(Number(e.target.value))}
         >
           {months.map((m) => (
-            <option key={m} value={m}>{MONTH_LABELS[m]}</option>
+            <option key={m} value={m}>{MONTH_NAMES_SHORT[m]}</option>
           ))}
         </select>
         <select

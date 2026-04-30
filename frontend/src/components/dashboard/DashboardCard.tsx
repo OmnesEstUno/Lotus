@@ -49,7 +49,7 @@ export default function DashboardCard({
             marginBottom: minimized ? 0 : undefined,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div className="dashboard-card-header-left">
             <button
               ref={setActivatorNodeRef}
               {...attributes}
@@ -57,50 +57,24 @@ export default function DashboardCard({
               type="button"
               aria-label="Drag to reorder card"
               className="dashboard-card-handle"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                minWidth: 32,
-                padding: 0,
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: isDragging ? 'grabbing' : 'grab',
-                borderRadius: 6,
-                touchAction: 'none',
-              }}
+              style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
+              <span className="material-symbols-outlined dashboard-card-drag-icon">
                 drag_indicator
               </span>
             </button>
-            <h2 style={{ margin: 0, minWidth: 0 }}>{title}</h2>
+            <h2 className="dashboard-card-title">{title}</h2>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className="dashboard-card-actions">
             {headerActions}
             <button
               type="button"
               aria-label={minimized ? 'Expand card' : 'Minimize card'}
               aria-expanded={!minimized}
               onClick={onToggleMinimize}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 44,
-                height: 44,
-                padding: 0,
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                borderRadius: 6,
-              }}
+              className="dashboard-card-minimize-btn"
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 22 }}>
+              <span className="material-symbols-outlined dashboard-card-minimize-icon">
                 {minimized ? 'expand_more' : 'expand_less'}
               </span>
             </button>

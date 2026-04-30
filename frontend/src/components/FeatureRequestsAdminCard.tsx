@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FeatureRequest, listFeatureRequests } from '../api/client';
+import { listFeatureRequests } from '../api/featureRequests';
+import type { FeatureRequest } from '../api/featureRequests';
 
 export default function FeatureRequestsAdminCard() {
   const [items, setItems] = useState<FeatureRequest[]>([]);

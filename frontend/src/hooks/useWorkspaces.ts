@@ -6,9 +6,8 @@ import {
   setActiveInstanceIdLocal,
   subscribeActiveInstance,
   getActiveInstanceId,
-  getCurrentUsername,
-  subscribeUsername,
-} from '../api/client';
+} from '../api/instances';
+import { getCurrentUsername, subscribeUsername } from '../api/auth';
 
 export function useWorkspaces() {
   const [instances, setInstances] = useState<Instance[]>([]);

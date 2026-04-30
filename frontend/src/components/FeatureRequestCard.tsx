@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { submitFeatureRequest } from '../api/client';
+import { submitFeatureRequest } from '../api/featureRequests';
 
 export default function FeatureRequestCard() {
   const [text, setText] = useState('');

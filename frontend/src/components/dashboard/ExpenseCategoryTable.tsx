@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { parseISO, subMonths } from 'date-fns';
 import { Transaction, Category, UserCategories } from '../../types';
-import { updateTransaction } from '../../api/client';
-import { MonthColumn, formatCurrency, MONTH_NAMES } from '../../utils/dataProcessing';
-import { getCategoryColor } from '../../utils/categories';
+import { updateTransaction } from '../../api/transactions';
+import { MonthColumn } from '../../utils/dataProcessing/monthlyExpenseTable';
+import { formatCurrency } from '../../utils/dataProcessing/shared';
+import { MONTH_NAMES_SHORT } from '../../utils/dateConstants';
+import { getCategoryColor } from '../../utils/categorization/colors';
 import { DrillDownRange, DRILL_DOWN_RANGE_LABELS } from './constants';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 
@@ -104,7 +106,7 @@ export default function ExpenseCategoryTable({
               <th className="sticky-col-left">Category</th>
               {columns.map((c, ci) => (
                 <th key={ci} className="num">
-                  <div>{MONTH_NAMES[c.month]}</div>
+                  <div>{MONTH_NAMES_SHORT[c.month]}</div>
                   {showYearSublabel && (
                     <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--text-muted)' }}>
                       {c.year}

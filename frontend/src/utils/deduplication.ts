@@ -6,19 +6,19 @@
 
 import { IncomeEntry, ParsedCSVRow, Transaction } from '../types';
 
-export function transactionDedupKey(t: Pick<Transaction, 'date' | 'description' | 'amount'>): string {
+function transactionDedupKey(t: Pick<Transaction, 'date' | 'description' | 'amount'>): string {
   const desc = (t.description ?? '').trim().toLowerCase();
   const amount = Number(t.amount).toFixed(2);
   return `${t.date}|${desc}|${amount}`;
 }
 
-export function incomeDedupKey(e: Pick<IncomeEntry, 'date' | 'description' | 'netAmount'>): string {
+function incomeDedupKey(e: Pick<IncomeEntry, 'date' | 'description' | 'netAmount'>): string {
   const desc = (e.description ?? '').trim().toLowerCase();
   const amount = Number(e.netAmount).toFixed(2);
   return `${e.date}|${desc}|${amount}`;
 }
 
-export function rowDedupKey(row: ParsedCSVRow): string {
+function rowDedupKey(row: ParsedCSVRow): string {
   if (row.kind === 'income') {
     return incomeDedupKey({ date: row.date, description: row.description, netAmount: row.amount });
   }

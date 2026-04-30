@@ -1,28 +1,25 @@
 import { useEffect, useState } from 'react';
-import { getTransactions, getIncome, renameCategory, deleteCategory } from '../api/client';
-import { IncomeEntry, Transaction, UserCategories } from '../types';
+import { getTransactions } from '../api/transactions';
+import { getIncome } from '../api/income';
+import { getUserCategories, renameCategory, deleteCategory } from '../api/categories';
+import { runMutation } from '../utils/mutation';
+import { dialog } from '../utils/dialog';
+import { IncomeEntry, Transaction } from '../types';
 import { useUserCategories } from '../hooks/useUserCategories';
-import { getCategoryColor } from '../utils/categories';
+import { getCategoryColor } from '../utils/categorization/colors';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CARD_LABELS, CardId } from '../hooks/useDashboardLayout';
 import {
   DndContext,
-  DragEndEvent,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
   closestCenter,
 } from '@dnd-kit/core';
 import {
   SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { useSortableListReorder } from '../hooks/useSortableListReorder';
 import { CSS } from '@dnd-kit/utilities';
 import InviteTokensCard from '../components/InviteTokensCard';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -92,26 +89,11 @@ function CardVisibilityRow({ id, label, checked, onToggle }: CardVisibilityRowPr
  * categories and the pattern→category mappings.
  */
 export default function Settings() {
-  const { userCategories, setUserCategories } = useUserCategories();
+  const { userCategories, setUserCategories, saveError } = useUserCategories();
   const currentUser = useCurrentUser();
   const { isActiveOwner, activeInstanceId } = useWorkspaces();
   const { cardOrder, setCardOrder, hidden, toggleHidden } = useDashboardLayout(activeInstanceId);
-  const sensors = useSensors(
-    useSensor(MouseSensor),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleCardOrderDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    setCardOrder((curr) => {
-      const oldIdx = curr.indexOf(active.id as CardId);
-      const newIdx = curr.indexOf(over.id as CardId);
-      if (oldIdx < 0 || newIdx < 0) return curr;
-      return arrayMove(curr, oldIdx, newIdx);
-    });
-  }
+  const { sensors, onDragEnd: handleCardOrderDragEnd } = useSortableListReorder(cardOrder, setCardOrder);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [income, setIncome] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,43 +120,49 @@ export default function Settings() {
       const [txns, inc] = await Promise.all([getTransactions(), getIncome()]);
       setTransactions(txns);
       setIncome(inc);
-    } catch {
-      /* non-fatal */
+    } catch (err) {
+      console.error('Failed to refresh transactions/income in Settings', err);
+      setStatus({ kind: 'error', text: 'Could not refresh data — some figures may be stale.' });
     }
   }
 
   async function handleRename(from: string) {
-    const newName = window.prompt(`Rename "${from}" to:`, from)?.trim();
+    const newName = (await dialog.prompt(`Rename "${from}" to:`, from))?.trim();
     if (!newName || newName === from) return;
-    setBusy(true);
-    setStatus(null);
-    try {
-      const result = await renameCategory(from, newName);
-      setStatus({
-        kind: 'success',
-        text: `Renamed "${from}" → "${newName}" (updated ${result.updated} transaction${result.updated !== 1 ? 's' : ''} and ${result.mappingsUpdated} mapping${result.mappingsUpdated !== 1 ? 's' : ''}).`,
-      });
-      // Optimistically update local custom-category list
-      setUserCategories((prev) => {
-        const nextCustom = prev.customCategories.map((c) => (c === from ? newName : c));
-        // De-dup case where `newName` already exists
-        const unique = [...new Set(nextCustom)];
-        return {
-          customCategories: unique,
-          mappings: prev.mappings.map((m) => (m.category === from ? { ...m, category: newName } : m)),
-        };
-      });
-      await refreshTransactions();
-    } catch (err) {
-      setStatus({ kind: 'error', text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
+    await runMutation({
+      onStart: () => { setBusy(true); setStatus(null); },
+      call: () => renameCategory(from, newName),
+      onSuccess: async (result) => {
+        // Update local state AFTER the API call succeeds to avoid racing the
+        // useUserCategories auto-save hook with the explicit mutation.
+        setUserCategories((prev) => {
+          const nextCustom = prev.customCategories.map((c) => (c === from ? newName : c));
+          // De-dup case where `newName` already exists
+          const unique = [...new Set(nextCustom)];
+          return {
+            customCategories: unique,
+            mappings: prev.mappings.map((m) => (m.category === from ? { ...m, category: newName } : m)),
+          };
+        });
+        await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
+        setStatus({
+          kind: 'success',
+          text: `Renamed "${from}" → "${newName}" (updated ${result.updated} transaction${result.updated !== 1 ? 's' : ''} and ${result.mappingsUpdated} mapping${result.mappingsUpdated !== 1 ? 's' : ''}).`,
+        });
+      },
+      onConflict: async (msg) => {
+        await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
+        setStatus({ kind: 'error', text: msg });
+      },
+      onError: (msg) => setStatus({ kind: 'error', text: msg }),
+      onFinally: () => setBusy(false),
+      conflictMessage: 'Data was changed by another tab — please retry the rename.',
+    });
   }
 
   async function handleDelete(name: string) {
     if (!isActiveOwner) {
-      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      await dialog.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
       return;
     }
     const count = categoryCounts.get(name) ?? 0;
@@ -182,30 +170,35 @@ export default function Settings() {
       count > 0
         ? `Delete "${name}"? ${count} transaction${count !== 1 ? 's' : ''} will be reassigned to "Other".`
         : `Delete "${name}"? This category has no transactions.`;
-    if (!window.confirm(msg)) return;
-    setBusy(true);
-    setStatus(null);
-    try {
-      const result = await deleteCategory(name, 'Other');
-      setStatus({
-        kind: 'success',
-        text: `Deleted "${name}" (reassigned ${result.reassigned} transaction${result.reassigned !== 1 ? 's' : ''}, removed ${result.mappingsRemoved} mapping${result.mappingsRemoved !== 1 ? 's' : ''}).`,
-      });
-      // Optimistic local update
-      setUserCategories((prev) => ({
-        customCategories: prev.customCategories.filter((c) => c !== name),
-        mappings: prev.mappings.filter((m) => m.category !== name),
-      }));
-      await refreshTransactions();
-    } catch (err) {
-      setStatus({ kind: 'error', text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
+    if (!await dialog.confirm(msg)) return;
+    await runMutation({
+      onStart: () => { setBusy(true); setStatus(null); },
+      call: () => deleteCategory(name, 'Other'),
+      onSuccess: async (result) => {
+        // Update local state AFTER the API call succeeds to avoid racing the
+        // useUserCategories auto-save hook with the explicit mutation.
+        setUserCategories((prev) => ({
+          customCategories: prev.customCategories.filter((c) => c !== name),
+          mappings: prev.mappings.filter((m) => m.category !== name),
+        }));
+        await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
+        setStatus({
+          kind: 'success',
+          text: `Deleted "${name}" (reassigned ${result.reassigned} transaction${result.reassigned !== 1 ? 's' : ''}, removed ${result.mappingsRemoved} mapping${result.mappingsRemoved !== 1 ? 's' : ''}).`,
+        });
+      },
+      onConflict: async (msg) => {
+        await Promise.all([refreshTransactions(), getUserCategories()]).catch(() => undefined);
+        setStatus({ kind: 'error', text: msg });
+      },
+      onError: (errMsg) => setStatus({ kind: 'error', text: errMsg }),
+      onFinally: () => setBusy(false),
+      conflictMessage: 'Data was changed by another tab — please retry the deletion.',
+    });
   }
 
-  function handleDeleteMapping(pattern: string) {
-    if (!window.confirm(`Delete the mapping for "${pattern}"?`)) return;
+  async function handleDeleteMapping(pattern: string) {
+    if (!await dialog.confirm(`Delete the mapping for "${pattern}"?`)) return;
     setUserCategories((prev) => ({
       ...prev,
       mappings: prev.mappings.filter((m) => m.pattern !== pattern),
@@ -213,11 +206,11 @@ export default function Settings() {
     setStatus({ kind: 'success', text: `Mapping for "${pattern}" removed.` });
   }
 
-  function handleEditMapping(pattern: string, currentCategory: string) {
-    const newCategory = window.prompt(
+  async function handleEditMapping(pattern: string, currentCategory: string) {
+    const newCategory = (await dialog.prompt(
       `Change the category for pattern "${pattern}" to:`,
       currentCategory,
-    )?.trim();
+    ))?.trim();
     if (!newCategory || newCategory === currentCategory) return;
     setUserCategories((prev) => ({
       ...prev,
@@ -252,6 +245,11 @@ export default function Settings() {
           style={{ marginBottom: 20 }}
         >
           {status.text}
+        </div>
+      )}
+      {saveError && (
+        <div className="alert alert-danger" style={{ marginBottom: 20 }}>
+          {saveError}
         </div>
       )}
 
@@ -466,5 +464,3 @@ export default function Settings() {
   );
 }
 
-// Re-export for use elsewhere if needed
-export type { UserCategories };

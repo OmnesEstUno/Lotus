@@ -9,9 +9,11 @@ import {
   verify2FA,
   migrateLegacy,
   isAuthenticated,
-} from '../api/client';
+} from '../api/auth';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
+import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
+import { sessionStore } from '../utils/storage';
 
 type Step =
   | 'loading'
@@ -44,6 +46,7 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [totpSecret, setTotpSecret] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [preAuthToken, setPreAuthToken] = useState('');
   const [inviteToken, setInviteToken] = useState('');
   const [error, setError] = useState('');
@@ -94,7 +97,7 @@ export default function Login() {
     e.preventDefault();
     setError('');
     const trimmedUsername = username.trim().toLowerCase();
-    if (!/^[a-z0-9_-]{3,32}$/.test(trimmedUsername)) {
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
       setError('Username must be 3–32 characters: lowercase letters, digits, underscore, or dash.');
       return;
     }
@@ -122,11 +125,11 @@ export default function Login() {
     e.preventDefault();
     setError('');
     const trimmedUsername = username.trim().toLowerCase();
-    if (!/^[a-z0-9_-]{3,32}$/.test(trimmedUsername)) {
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
       setError('Username must be 3–32 characters: lowercase letters, digits, underscore, or dash.');
       return;
     }
-    if (password.length < 8) {
+    if (password.length < PASSWORD_MIN_LENGTH) {
       setError('Your password must be at least 8 characters long.');
       return;
     }
@@ -136,9 +139,10 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { totpSecret: secret } = await initSetup(trimmedUsername, password, inviteToken);
+      const { totpSecret: secret, setupToken: token } = await initSetup(trimmedUsername, password, inviteToken);
       setUsername(trimmedUsername);
       setTotpSecret(secret);
+      setSetupToken(token);
       setStep('setup-totp');
     } catch (err) {
       setError((err as Error).message);
@@ -158,7 +162,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      await confirmSetup(username, totpCode);
+      await confirmSetup(username, totpCode, setupToken);
       setStep('login-password');
       setPassword('');
       setTotpCode('');
@@ -200,9 +204,9 @@ export default function Login() {
     setLoading(true);
     try {
       await verify2FA(preAuthToken, totpCode);
-      const pending = sessionStorage.getItem('ft_pending_workspace_invite');
+      const pending = sessionStore.get(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
       if (pending) {
-        sessionStorage.removeItem('ft_pending_workspace_invite');
+        sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
         window.location.hash = `#/workspace-invite?token=${encodeURIComponent(pending)}`;
         return;
       }
@@ -326,7 +330,7 @@ export default function Login() {
                 required
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                3–32 characters: lowercase letters, digits, underscore, or dash.
+                {USERNAME_HINT}
               </p>
             </div>
             <div className="form-group">
@@ -376,7 +380,7 @@ export default function Login() {
                 required
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                3–32 characters: lowercase letters, digits, underscore, or dash.
+                {USERNAME_HINT}
               </p>
             </div>
             <div className="form-group">
@@ -387,7 +391,7 @@ export default function Login() {
                 placeholder="Min. 8 characters"
                 autoComplete="new-password"
                 required
-                minLength={8}
+                minLength={PASSWORD_MIN_LENGTH}
               />
             </div>
             <div className="form-group">

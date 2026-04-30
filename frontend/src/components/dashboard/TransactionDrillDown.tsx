@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react';
 import { Category, UserCategories } from '../../types';
-import { TransactionUpdate, IncomeUpdate } from '../../api/client';
-import { formatCurrency } from '../../utils/dataProcessing';
-import { getCategoryColor } from '../../utils/categories';
+import type { TransactionUpdate } from '../../api/transactions';
+import type { IncomeUpdate } from '../../api/income';
+import { formatCurrency } from '../../utils/dataProcessing/shared';
+import { getCategoryColor } from '../../utils/categorization/colors';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../CategorySelect';
 import NotesCell from './NotesCell';
 import RowActionsMenu from './RowActionsMenu';
+import { dialog } from '../../utils/dialog';
 
 // ─── Unified drill-down event shape ────────────────────────────────────────
 
@@ -106,11 +108,11 @@ export default function TransactionDrillDown({
   async function deleteSelected() {
     if (selectedIds.size === 0) return;
     if (!isActiveOwner) {
-      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      await dialog.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
       return;
     }
     const n = selectedIds.size;
-    if (!window.confirm(`Delete ${n} selected entr${n !== 1 ? 'ies' : 'y'}?`)) return;
+    if (!await dialog.confirm(`Delete ${n} selected entr${n !== 1 ? 'ies' : 'y'}?`)) return;
 
     const txnIds: string[] = [];
     const incIds: string[] = [];
@@ -133,10 +135,10 @@ export default function TransactionDrillDown({
 
   async function handleDeleteOne(e: DrillDownEvent) {
     if (!isActiveOwner) {
-      window.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
+      await dialog.alert("You can't delete data from a workspace that you don't own. Only the workspace owner can delete data.");
       return;
     }
-    if (!window.confirm(`Delete "${e.description}"?`)) return;
+    if (!await dialog.confirm(`Delete "${e.description}"?`)) return;
     setBusy(true);
     try {
       await onDeleteOne(e);
@@ -164,7 +166,7 @@ export default function TransactionDrillDown({
     if (!editDraft) return;
     const amt = parseFloat(editDraft.amount);
     if (isNaN(amt) || amt <= 0) {
-      window.alert('Please enter a valid positive amount.');
+      await dialog.alert('Please enter a valid positive amount.');
       return;
     }
     setBusy(true);
@@ -190,10 +192,10 @@ export default function TransactionDrillDown({
     }
   }
 
-  function handleEditCategoryPick(picked: string) {
+  async function handleEditCategoryPick(picked: string) {
     if (!editDraft) return;
     if (picked === NEW_CATEGORY_SENTINEL) {
-      const input = window.prompt('Name for the new category:');
+      const input = await dialog.prompt('Name for the new category:');
       if (!input) return;
       const name = addCustomCategory(input);
       if (!name) return;

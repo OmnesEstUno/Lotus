@@ -1,36 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { Transaction } from '../../types';
-import { getTransactions, updateTransaction } from '../../api/client';
-import { formatCurrency } from '../../utils/dataProcessing';
-import { getCategoryColor } from '../../utils/categories';
+import { getTransactions, updateTransaction } from '../../api/transactions';
+import { formatCurrency } from '../../utils/dataProcessing/shared';
+import { getCategoryColor } from '../../utils/categorization/colors';
+import { useListWithActions } from '../../hooks/useListWithActions';
 
 export default function ArchivedCard() {
-  const [archived, setArchived] = useState<Transaction[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  async function refresh() {
-    try {
-      const all = await getTransactions();
-      setArchived(all.filter((t) => t.archived));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  useEffect(() => { refresh(); }, []);
+  const fetchArchived = useCallback(
+    () => getTransactions().then((all) => all.filter((t) => t.archived)),
+    [],
+  );
+  const { items: archived, loading: busy, error, runAction } = useListWithActions<Transaction>(fetchArchived);
 
   async function handleUnarchive(id: string) {
-    setBusy(true);
-    setError('');
-    try {
-      await updateTransaction(id, { archived: false });
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    await runAction(async () => { await updateTransaction(id, { archived: false }); });
   }
 
   return (

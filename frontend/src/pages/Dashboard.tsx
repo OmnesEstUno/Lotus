@@ -1,45 +1,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   DndContext,
-  DragEndEvent,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
   closestCenter,
 } from '@dnd-kit/core';
 import {
   SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { useSortableListReorder } from '../hooks/useSortableListReorder';
 import { Transaction, IncomeEntry, TimeRange, Category, CustomDateRange } from '../types';
 import {
   getTransactions,
-  getIncome,
-  bulkDelete,
-  bulkUpdateCategory,
   addTransactions,
-  addIncome,
   updateTransaction,
-  updateIncome,
-  AddTransactionInput,
-  AddIncomeInput,
-} from '../api/client';
-import { derivePattern } from '../utils/categories';
-import { parseISO } from 'date-fns';
+  bulkUpdateCategory,
+  bulkDelete,
+} from '../api/transactions';
+import type { AddTransactionInput } from '../api/transactions';
 import {
-  buildMonthlyExpenseTable,
-  buildMonthlyBalance,
-  buildCategoryAverages,
-  filterByRange,
-  formatCurrency,
-  getTrackedDuration,
-  MONTH_NAMES,
-} from '../utils/dataProcessing';
-import { getCategoryColor } from '../utils/categories';
+  getIncome,
+  addIncome,
+  updateIncome,
+} from '../api/income';
+import type { AddIncomeInput } from '../api/income';
+import { derivePattern } from '../utils/categorization/rules';
+import { runMutation } from '../utils/mutation';
+import { parseISO } from 'date-fns';
+import { buildMonthlyExpenseTable } from '../utils/dataProcessing/monthlyExpenseTable';
+import { buildMonthlyBalance } from '../utils/dataProcessing/monthlyBalance';
+import { buildCategoryAverages } from '../utils/dataProcessing/categoryAverages';
+import { filterByRange, formatCurrency, getTrackedDuration } from '../utils/dataProcessing/shared';
+import { MONTH_NAMES_SHORT } from '../utils/dateConstants';
+import { getCategoryColor } from '../utils/categorization/colors';
 import CategoryLineChart from '../components/charts/CategoryLineChart';
 import ExpenseCategoryTable from '../components/dashboard/ExpenseCategoryTable';
 import TimeRangeSelector from '../components/dashboard/TimeRangeSelector';
@@ -57,6 +49,8 @@ import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CardId } from '../hooks/useDashboardLayout';
 import Layout from '../components/layout/Layout';
 import { useDataEntry } from '../contexts/DataEntryContext';
+import { YEAR_LOOKBACK } from '../utils/constants';
+import { dialog } from '../utils/dialog';
 
 // Undo-toast payload: what was just deleted, so we can restore it if the
 // user clicks Undo before the timeout fires.
@@ -84,6 +78,9 @@ export default function Dashboard() {
   // Undo toast — populated right after a successful delete
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
 
+  // Conflict toast — shown when a 409 is received from a write endpoint
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+
   // Custom categories used by the edit flow
   const { userCategories, addCustomCategory } = useUserCategories();
 
@@ -99,18 +96,9 @@ export default function Dashboard() {
     hidden,
   } = useDashboardLayout(activeInstanceId);
 
-  // Drag sensors. MouseSensor fires immediately on desktop; TouchSensor
-  // requires a 200ms long-press so mobile scrolls aren't hijacked. Keyboard
-  // sensor gives full a11y (tab → space → arrow keys → space).
-  const sensors = useSensors(
-    useSensor(MouseSensor),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
+  // Drag sensors + drag-end handler via shared hook (MouseSensor / TouchSensor
+  // long-press / KeyboardSensor for a11y).
+  const { sensors, onDragEnd: handleDragEnd } = useSortableListReorder(cardOrder, setCardOrder);
 
   const refetchAll = useCallback(async () => {
     try {
@@ -134,7 +122,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (activeInstanceId === undefined) return; // still resolving (shouldn't happen with null init)
     setLoading(false);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally runs once on mount only;
+  // adding activeInstanceId would re-trigger on every workspace switch, fighting the effect below.
+  }, []);
 
   // Refetch whenever the active workspace changes (including first real load).
   useEffect(() => {
@@ -145,17 +135,6 @@ export default function Dashboard() {
     setLoading(true);
     refetchAll().finally(() => setLoading(false));
   }, [activeInstanceId, refetchAll]);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    setCardOrder((curr) => {
-      const oldIdx = curr.indexOf(active.id as CardId);
-      const newIdx = curr.indexOf(over.id as CardId);
-      if (oldIdx < 0 || newIdx < 0) return curr;
-      return arrayMove(curr, oldIdx, newIdx);
-    });
-  }, []);
 
   /**
    * Delete wrapper: captures the full rows being deleted (for undo), then
@@ -169,14 +148,17 @@ export default function Dashboard() {
       const deletedTxns = transactions.filter((t) => txnIds.includes(t.id));
       const deletedInc = income.filter((e) => incIds.includes(e.id));
 
-      try {
-        await bulkDelete(txnIds, incIds);
-        await refetchAll();
-        // Arm the undo toast
-        setPendingUndo({ transactions: deletedTxns, income: deletedInc, label });
-      } catch (err) {
-        window.alert(`Delete failed: ${(err as Error).message}`);
-      }
+      await runMutation({
+        call: () => bulkDelete(txnIds, incIds),
+        onSuccess: async () => {
+          await refetchAll();
+          // Arm the undo toast
+          setPendingUndo({ transactions: deletedTxns, income: deletedInc, label });
+        },
+        onConflict: async (msg) => { await refetchAll(); setConflictMessage(msg); },
+        onError: (msg) => dialog.alert(`Delete failed: ${msg}`),
+        conflictMessage: 'Data was changed by another tab — please retry your action.',
+      });
     },
     [transactions, income, refetchAll],
   );
@@ -188,37 +170,39 @@ export default function Dashboard() {
    */
   const handleUndo = useCallback(async () => {
     if (!pendingUndo) return;
-    try {
-      if (pendingUndo.transactions.length > 0) {
-        const payload: AddTransactionInput[] = pendingUndo.transactions.map((t) => ({
-          date: t.date,
-          description: t.description,
-          category: t.category,
-          amount: t.amount,
-          type: t.type,
-          source: t.source,
-          allowDuplicate: true,
-        }));
-        await addTransactions(payload);
-      }
-      for (const e of pendingUndo.income) {
-        const payload: AddIncomeInput = {
-          date: e.date,
-          description: e.description,
-          grossAmount: e.grossAmount,
-          netAmount: e.netAmount,
-          taxes: e.taxes,
-          source: e.source,
-          allowDuplicate: true,
-        };
-        await addIncome(payload);
-      }
-      await refetchAll();
-    } catch (err) {
-      window.alert(`Undo failed: ${(err as Error).message}`);
-    } finally {
-      setPendingUndo(null);
-    }
+    await runMutation({
+      call: async () => {
+        if (pendingUndo.transactions.length > 0) {
+          const payload: AddTransactionInput[] = pendingUndo.transactions.map((t) => ({
+            date: t.date,
+            description: t.description,
+            category: t.category,
+            amount: t.amount,
+            type: t.type,
+            source: t.source,
+            allowDuplicate: true,
+          }));
+          await addTransactions(payload);
+        }
+        for (const e of pendingUndo.income) {
+          const payload: AddIncomeInput = {
+            date: e.date,
+            description: e.description,
+            grossAmount: e.grossAmount,
+            netAmount: e.netAmount,
+            taxes: e.taxes,
+            source: e.source,
+            allowDuplicate: true,
+          };
+          await addIncome(payload);
+        }
+      },
+      onSuccess: async () => { await refetchAll(); },
+      onConflict: async (msg) => { await refetchAll(); setConflictMessage(msg); },
+      onError: (msg) => dialog.alert(`Undo failed: ${msg}`),
+      onFinally: () => setPendingUndo(null),
+      conflictMessage: 'Data was changed by another tab — please retry the undo.',
+    });
   }, [pendingUndo, refetchAll]);
 
   /**
@@ -228,52 +212,56 @@ export default function Dashboard() {
   const handleUpdateTransaction = useCallback(
     async (id: string, updates: Parameters<typeof updateTransaction>[1]) => {
       const prev = transactions.find((t) => t.id === id);
-      try {
-        await updateTransaction(id, updates);
-        // If the category changed, offer to apply it to other transactions with a
-        // matching derived description pattern. Skips built-in income rows and
-        // anything already in the new category.
-        if (
-          prev &&
-          updates.category &&
-          updates.category !== prev.category &&
-          prev.type === 'expense'
-        ) {
-          const pattern = derivePattern(prev.description);
-          const patternLower = pattern.toLowerCase();
-          const matches = transactions.filter(
-            (t) =>
-              t.id !== id &&
-              !t.archived &&
-              t.type === 'expense' &&
-              t.category === prev.category &&
-              t.description.toLowerCase().includes(patternLower),
-          );
+      await runMutation({
+        call: () => updateTransaction(id, updates),
+        onSuccess: async () => {
+          // If the category changed, offer to apply it to other transactions with a
+          // matching derived description pattern. Skips built-in income rows and
+          // anything already in the new category.
           if (
-            matches.length > 0 &&
-            window.confirm(
-              `Apply "${updates.category}" to ${matches.length} other transaction${matches.length !== 1 ? 's' : ''} matching "${pattern}"?`,
-            )
+            prev &&
+            updates.category &&
+            updates.category !== prev.category &&
+            prev.type === 'expense'
           ) {
-            await bulkUpdateCategory(pattern, updates.category, prev.category);
+            const pattern = derivePattern(prev.description);
+            const patternLower = pattern.toLowerCase();
+            const matches = transactions.filter(
+              (t) =>
+                t.id !== id &&
+                !t.archived &&
+                t.type === 'expense' &&
+                t.category === prev.category &&
+                t.description.toLowerCase().includes(patternLower),
+            );
+            if (
+              matches.length > 0 &&
+              await dialog.confirm(
+                `Apply "${updates.category}" to ${matches.length} other transaction${matches.length !== 1 ? 's' : ''} matching "${pattern}"?`,
+              )
+            ) {
+              await bulkUpdateCategory(pattern, updates.category, prev.category);
+            }
           }
-        }
-        await refetchAll();
-      } catch (err) {
-        window.alert(`Update failed: ${(err as Error).message}`);
-      }
+          await refetchAll();
+        },
+        onConflict: async (msg) => { await refetchAll(); setConflictMessage(msg); },
+        onError: (msg) => dialog.alert(`Update failed: ${msg}`),
+        conflictMessage: 'Data was changed by another tab — please retry your update.',
+      });
     },
     [transactions, refetchAll],
   );
 
   const handleUpdateIncome = useCallback(
     async (id: string, updates: Parameters<typeof updateIncome>[1]) => {
-      try {
-        await updateIncome(id, updates);
-        await refetchAll();
-      } catch (err) {
-        window.alert(`Update failed: ${(err as Error).message}`);
-      }
+      await runMutation({
+        call: () => updateIncome(id, updates),
+        onSuccess: () => refetchAll(),
+        onConflict: async (msg) => { await refetchAll(); setConflictMessage(msg); },
+        onError: (msg) => dialog.alert(`Update failed: ${msg}`),
+        conflictMessage: 'Data was changed by another tab — please retry your update.',
+      });
     },
     [refetchAll],
   );
@@ -405,7 +393,7 @@ export default function Dashboard() {
           >
             {expenseRange && (() => {
               const today = new Date();
-              const tenYearsAgo = new Date(today.getFullYear() - 10, today.getMonth(), today.getDate());
+              const tenYearsAgo = new Date(today.getFullYear() - YEAR_LOOKBACK, today.getMonth(), today.getDate());
               const oldest = transactions.filter((t) => !t.archived).map((t) => t.date).sort()[0];
               const tenYrStr = tenYearsAgo.toISOString().slice(0, 10);
               const minDate = oldest && oldest > tenYrStr ? oldest : tenYrStr;
@@ -455,7 +443,7 @@ export default function Dashboard() {
                 Income vs. Expenditures
                 {expandedMonth !== null && (
                   <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
-                    / {MONTH_NAMES[expandedMonth.month]} {expandedMonth.year}
+                    / {MONTH_NAMES_SHORT[expandedMonth.month]} {expandedMonth.year}
                   </span>
                 )}
               </>
@@ -547,7 +535,7 @@ export default function Dashboard() {
           >
             {avgRange && (() => {
               const today = new Date();
-              const tenYearsAgo = new Date(today.getFullYear() - 10, today.getMonth(), today.getDate());
+              const tenYearsAgo = new Date(today.getFullYear() - YEAR_LOOKBACK, today.getMonth(), today.getDate());
               const oldest = transactions.filter((t) => !t.archived).map((t) => t.date).sort()[0];
               const tenYrStr = tenYearsAgo.toISOString().slice(0, 10);
               const minDate = oldest && oldest > tenYrStr ? oldest : tenYrStr;
@@ -689,6 +677,15 @@ export default function Dashboard() {
           onAction={handleUndo}
           onDismiss={() => setPendingUndo(null)}
           duration={5000}
+        />
+      )}
+
+      {/* Conflict toast — shown when a 409 stale-write is detected */}
+      {conflictMessage && !pendingUndo && (
+        <Toast
+          message={conflictMessage}
+          onDismiss={() => setConflictMessage(null)}
+          duration={6000}
         />
       )}
     </Layout>

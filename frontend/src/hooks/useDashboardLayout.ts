@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
+import { STORAGE_KEYS } from '../utils/constants';
+import { storage } from '../utils/storage';
 
-export const CARD_IDS = [
+const CARD_IDS = [
   'spending-trends',
   'expenses-by-category',
   'income-vs-expenditures',
@@ -17,9 +19,6 @@ export const CARD_LABELS: Record<CardId, string> = {
   'all-transactions': 'All Transactions',
 };
 
-const orderKey = (id: string) => `dashboard:cardOrder:${id}`;
-const minKey = (id: string) => `dashboard:minimized:${id}`;
-const hiddenKey = (id: string) => `dashboard:hidden:${id}`;
 
 function reconcileOrder(saved: string[] | null): CardId[] {
   if (!saved) return [...CARD_IDS];
@@ -30,7 +29,7 @@ function reconcileOrder(saved: string[] | null): CardId[] {
 
 function readSet(key: string): Set<CardId> {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = storage.get(key);
     const parsed = raw ? (JSON.parse(raw) as string[]) : [];
     return new Set(parsed.filter((id): id is CardId => (CARD_IDS as readonly string[]).includes(id)));
   } catch {
@@ -47,13 +46,13 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
   useEffect(() => {
     if (!instanceId) return;
     try {
-      const raw = localStorage.getItem(orderKey(instanceId));
+      const raw = storage.get(STORAGE_KEYS.DASHBOARD_ORDER(instanceId));
       setCardOrderState(reconcileOrder(raw ? (JSON.parse(raw) as string[]) : null));
     } catch {
       setCardOrderState([...CARD_IDS]);
     }
-    setMinimizedState(readSet(minKey(instanceId)));
-    setHiddenState(readSet(hiddenKey(instanceId)));
+    setMinimizedState(readSet(STORAGE_KEYS.DASHBOARD_MINIMIZED(instanceId)));
+    setHiddenState(readSet(STORAGE_KEYS.HIDDEN(instanceId)));
   }, [instanceId]);
 
   // Writes happen synchronously inside setters (not useEffects) to avoid
@@ -65,7 +64,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
       setCardOrderState((prev) => {
         const next = typeof update === 'function' ? update(prev) : update;
         if (instanceId) {
-          localStorage.setItem(orderKey(instanceId), JSON.stringify(next));
+          storage.set(STORAGE_KEYS.DASHBOARD_ORDER(instanceId), JSON.stringify(next));
         }
         return next;
       });
@@ -80,7 +79,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
         if (next.has(id)) next.delete(id);
         else next.add(id);
         if (instanceId) {
-          localStorage.setItem(minKey(instanceId), JSON.stringify([...next]));
+          storage.set(STORAGE_KEYS.DASHBOARD_MINIMIZED(instanceId), JSON.stringify([...next]));
         }
         return next;
       });
@@ -95,7 +94,7 @@ export function useDashboardLayout(instanceId: string | null | undefined) {
         if (next.has(id)) next.delete(id);
         else next.add(id);
         if (instanceId) {
-          localStorage.setItem(hiddenKey(instanceId), JSON.stringify([...next]));
+          storage.set(STORAGE_KEYS.HIDDEN(instanceId), JSON.stringify([...next]));
         }
         return next;
       });

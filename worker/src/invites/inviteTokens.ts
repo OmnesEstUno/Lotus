@@ -1,7 +1,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { InviteCommon } from './invites/primitives';
-import { makeInviteModule, InviteListItem } from './invites/moduleFactory';
-import { INVITE_TTL_SECONDS } from './constants';
+import { InviteCommon } from './primitives';
+import { makeInviteModule, InviteListItem } from './moduleFactory';
+import { INVITE_TTL_SECONDS } from '../constants';
 
 export interface InviteRecord extends InviteCommon {}
 

@@ -19,14 +19,14 @@ import {
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './migrations';
-import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites';
+import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
   createWorkspaceInvite,
   verifyWorkspaceInvite,
   markWorkspaceInviteUsed,
   listWorkspaceInvites,
   deleteWorkspaceInvite,
-} from './workspace-invites';
+} from './invites/workspaceInvites';
 import {
   readAllYears,
   readAllYearsWithVersion,

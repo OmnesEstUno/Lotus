@@ -5,8 +5,10 @@ import {
 import { Transaction, IncomeEntry, Category, UserCategories } from '../../types';
 import { updateTransaction, updateIncome } from '../../api/client';
 import {
-  buildDailyBalance, buildMonthEvents, formatCurrency,
-} from '../../utils/dataProcessing';
+  buildDailyBalance,
+} from '../../utils/dataProcessing/dailyBalance';
+import { buildMonthEvents } from '../../utils/dataProcessing/monthEvents';
+import { formatCurrency } from '../../utils/dataProcessing/shared';
 import { MONTH_NAMES_SHORT } from '../../utils/dateConstants';
 import { INCOME_COLOR, EXPENSE_COLOR, formatAxisCurrency } from './constants';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';

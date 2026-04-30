@@ -1,5 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
-import { formatCurrency } from '../../utils/dataProcessing';
+import { formatCurrency } from '../../utils/dataProcessing/shared';
 import { formatAxisCurrency } from './constants';
 
 interface Props {

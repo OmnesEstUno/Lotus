@@ -11,7 +11,7 @@ import {
   AddTransactionInput,
 } from '../api/client';
 import { runMutation } from '../utils/mutation';
-import { formatCurrency } from '../utils/dataProcessing';
+import { formatCurrency } from '../utils/dataProcessing/shared';
 import {
   buildExistingDedupLookup,
   ExistingDedupLookup,

@@ -1,4 +1,4 @@
-import { formatCurrency } from '../../utils/dataProcessing';
+import { formatCurrency } from '../../utils/dataProcessing/shared';
 
 interface MonthlyBalanceViewProps {
   monthlyBalance: Array<{

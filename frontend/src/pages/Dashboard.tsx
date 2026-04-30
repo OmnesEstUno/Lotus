@@ -24,14 +24,10 @@ import {
 import { derivePattern } from '../utils/categorization/rules';
 import { runMutation } from '../utils/mutation';
 import { parseISO } from 'date-fns';
-import {
-  buildMonthlyExpenseTable,
-  buildMonthlyBalance,
-  buildCategoryAverages,
-  filterByRange,
-  formatCurrency,
-  getTrackedDuration,
-} from '../utils/dataProcessing';
+import { buildMonthlyExpenseTable } from '../utils/dataProcessing/monthlyExpenseTable';
+import { buildMonthlyBalance } from '../utils/dataProcessing/monthlyBalance';
+import { buildCategoryAverages } from '../utils/dataProcessing/categoryAverages';
+import { filterByRange, formatCurrency, getTrackedDuration } from '../utils/dataProcessing/shared';
 import { MONTH_NAMES_SHORT } from '../utils/dateConstants';
 import { getCategoryColor } from '../utils/categorization/colors';
 import CategoryLineChart from '../components/charts/CategoryLineChart';

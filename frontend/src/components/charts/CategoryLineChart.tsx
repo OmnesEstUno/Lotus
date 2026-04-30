@@ -12,7 +12,8 @@ import {
 } from 'recharts';
 import { Category, CustomDateRange, TimeRange } from '../../types';
 import { getCategoryColor } from '../../utils/categorization/colors';
-import { buildLineChartData, formatCurrency, getMaxValue, getTrendingCategories } from '../../utils/dataProcessing';
+import { buildLineChartData } from '../../utils/dataProcessing/lineChartData';
+import { formatCurrency, getMaxValue, getTrendingCategories } from '../../utils/dataProcessing/shared';
 import { Transaction } from '../../types';
 import DateRangePicker from '../DateRangePicker';
 import CategoryChipRow from '../dashboard/CategoryChipRow';

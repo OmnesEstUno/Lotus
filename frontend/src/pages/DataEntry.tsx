@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, FormEvent, DragEvent } from 'react';
 import { SUCCESS_FLASH_DURATION_MS } from '../utils/constants';
 import { BUILT_IN_CATEGORIES, Category, IncomeEntry, ParsedCSVRow } from '../types';
-import { parseTransactionCSV, parseIncomeCSV } from '../utils/csvParser';
+import { parseTransactionCSV } from '../utils/csv/parseTransactions';
+import { parseIncomeCSV } from '../utils/csv/parseIncome';
 import { parsePDFPaystub, extractIncomeFromCSVText, ExtractedPaystub } from '../utils/pdfParser';
 import {
   addTransactions,

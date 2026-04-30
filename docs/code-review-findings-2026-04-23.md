@@ -328,11 +328,93 @@ After the initial 13-phase cleanup, a follow-up survey identified six remaining 
 - `5af2bb2` — useListWithActions hook
 - `3025991` — getVersionedList helper
 
+## Phase 15 — Encapsulation + folder structure
+
+After the 14-phase content cleanup, a final pass reshaped the directory tree so file/folder names communicate architecture before any code is read. The plan: nested folders by responsibility, abbreviation removal, naming consistency.
+
+| Sub-phase | What changed | Commits |
+|---|---|---|
+| 15a | Worker reorg: flat layout → `auth/`, `invites/`, `storage/` subfolders. Extracted `rateLimit.ts` from `index.ts`. Split `invite-primitives.ts` into `invites/primitives.ts` (low-level helpers) + `invites/moduleFactory.ts` (the `makeInviteModule` factory). Renamed `invites.ts` → `invites/inviteTokens.ts` (more specific name), `paginated.ts` → `storage/paginatedYearStorage.ts`, `migrations.ts` → `storage/kvMigrations.ts`. | 5 |
+| 15b | Frontend utils reorg: `categories.ts` split into `categorization/{rules,colors}.ts`. `dataProcessing.ts` split into 7 files under `dataProcessing/` (one per `build*` function plus a `shared.ts` for cross-cutting helpers). `csvParser.ts` split by concern (`csv/{shared,parseTransactions,parseIncome}.ts`) — the original wasn't actually two-format-parsers; it was schema-detecting, so the split is by concern not by format. Renamed `dedup.ts` → `deduplication.ts`. | 4 |
+| 15c | Frontend API reorg: `client.ts` (~600 lines) split into 8 per-resource files (`core.ts`, `auth.ts`, `transactions.ts`, `income.ts`, `categories.ts`, `instances.ts`, `invites.ts`, `featureRequests.ts`). 23 consumer files migrated to per-resource imports. `client.ts` deleted. Staged migration (core → resource files via re-export shim → migrate consumers → delete shim) kept the build green at every step. | 4 |
+
+### Final directory structure
+
+```
+frontend/src/
+├── api/
+│   ├── core.ts                    (request, ConflictError, version map, getVersionedList)
+│   ├── auth.ts                    (login, setup, TOTP, session subscriptions)
+│   ├── transactions.ts            (CRUD + bulkUpdateCategory + bulkDelete + purgeAllData)
+│   ├── income.ts                  (CRUD)
+│   ├── categories.ts              (user categories CRUD + rename/delete)
+│   ├── instances.ts               (workspace CRUD + active-instance state)
+│   ├── invites.ts                 (admin tokens + workspace invite redemption)
+│   └── featureRequests.ts         (CRUD)
+├── utils/
+│   ├── categorization/
+│   │   ├── rules.ts               (categorize() + auto-rules)
+│   │   └── colors.ts              (CATEGORY_COLORS + getCategoryColor)
+│   ├── dataProcessing/
+│   │   ├── monthlyBalance.ts
+│   │   ├── categoryAverages.ts
+│   │   ├── lineChartData.ts
+│   │   ├── monthEvents.ts
+│   │   ├── dailyBalance.ts
+│   │   ├── monthlyExpenseTable.ts
+│   │   └── shared.ts
+│   ├── csv/
+│   │   ├── shared.ts              (schema detection + low-level field parsers)
+│   │   ├── parseTransactions.ts   (main entry)
+│   │   └── parseIncome.ts         (pay-stub helper)
+│   ├── deduplication.ts           (was dedup.ts)
+│   ├── pdfParser.ts
+│   ├── dateConstants.ts
+│   ├── constants.ts
+│   ├── storage.ts
+│   ├── dialog.ts
+│   ├── download.ts
+│   └── mutation.ts
+└── (rest of frontend/src/ unchanged: components/, hooks/, pages/, types/, etc.)
+
+worker/src/
+├── index.ts                       (routing — intentionally left as one large file)
+├── constants.ts
+├── auth/
+│   ├── crypto.ts
+│   └── rateLimit.ts
+├── invites/
+│   ├── primitives.ts
+│   ├── moduleFactory.ts
+│   ├── inviteTokens.ts
+│   └── workspaceInvites.ts
+└── storage/
+    ├── paginatedYearStorage.ts
+    └── kvMigrations.ts
+```
+
+### Why this matters
+
+The directory tree now communicates architecture as data. A new agent (or human reader) dropped into the codebase can infer the system's layers and concerns from `ls -R src/` without reading a single line of code. Specifically:
+
+- `frontend/src/api/{auth,transactions,income,categories,instances,invites}.ts` immediately tells you the API surface area.
+- `worker/src/{auth,invites,storage}/` mirrors the same conceptual layers on the backend.
+- `utils/categorization/{rules,colors}.ts` makes it clear that categorization has both a rule layer and a presentation layer.
+- `utils/dataProcessing/<one file per chart function>` means jumping to the right code is name-driven, not grep-driven.
+
+### Honest tradeoffs
+
+- **Lines went up again:** +77 (12,873 → 12,950). Each new file has imports + module overhead. The win is exploration cost, not code volume.
+- **More files to navigate:** 38 source files now vs ~30 before Phase 15. Reasonable in exchange for better grouping.
+- **`worker/src/index.ts` still 1500 lines:** intentionally not split. Its responsibility is routing; splitting routing logic across files would fragment the Cloudflare Worker entry point in a way that complicates the eventual RN port without clear benefit.
+- **No barrel `index.ts` files in new folders:** by design — consumers import from specific files, which keeps the tree shape informative and avoids cyclic-import surprises.
+
 ## Updated Final State
 
-- **Total commits since main:** 63 (was 57 after Phase 13).
-- **Final LOC:** 12,873 (was 12,759).
-- **Skipped consolidations** (with reasons documented above): InviteTokensCard, WorkspaceInvitesPanel, getUserCategories, getInstances, multi-version worker endpoints, single-record query-param endpoint, FeatureRequest cards, chart containers, chart tooltips, CSV parsers.
+- **Total commits since main:** 76 (was 63 after Phase 14, +13 in Phase 15).
+- **Final LOC:** 12,950 (was 12,759 after Phase 13, +91 in Phase 14, +77 in Phase 15).
+- **Source files:** 38 (was ~30) under `frontend/src/{api,utils}` + `worker/src/`.
+- **Skipped consolidations** (documented earlier): InviteTokensCard, WorkspaceInvitesPanel, getUserCategories, getInstances, multi-version worker endpoints, single-record query-param endpoint, FeatureRequest cards, chart containers, chart tooltips. **Skipped reorganizations:** worker's `index.ts` (routing — intentionally cohesive), pages/components (Phase 12 declined for similar cohesion reasons).
 
 ## Next Steps
 

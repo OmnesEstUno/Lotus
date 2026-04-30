@@ -18,7 +18,7 @@ import {
   verifyTOTP,
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
-import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './migrations';
+import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
   createWorkspaceInvite,
@@ -36,7 +36,7 @@ import {
   updateInAnyYear,
   deleteFromAnyYear,
   yearOfISODate,
-} from './paginated';
+} from './storage/paginatedYearStorage';
 import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS } from './constants';
 
 export interface Env {

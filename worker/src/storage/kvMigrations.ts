@@ -1,5 +1,5 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { writeAllYears, yearOfISODate } from './paginated';
+import { writeAllYears, yearOfISODate } from './paginatedYearStorage';
 
 const profileKey = (username: string) => `users:${username}:profile`;
 const userDataKey = (username: string, leaf: string) => `users:${username}:${leaf}`;

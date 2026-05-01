@@ -35,6 +35,11 @@ export default function Layout({ children }: LayoutProps) {
               <span className="navbar-tagline hide-mobile">Budget. Bloom. Balance</span>
             </span>
             <div className="navbar-links">
+              {currentUser && (
+                <span className="navbar-user">
+                  {currentUser}
+                </span>
+              )}
               {onSettings ? (
                 <Link to="/dashboard" className="nav-link" aria-label="Dashboard">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -62,11 +67,6 @@ export default function Layout({ children }: LayoutProps) {
                 </svg>
                 <span className="nav-link-label">Logout</span>
               </button>
-              {currentUser && (
-                <span className="navbar-user hide-mobile">
-                  {currentUser}
-                </span>
-              )}
             </div>
           </div>
         </nav>

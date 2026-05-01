@@ -173,12 +173,17 @@ a:hover { color: var(--accent-hover); }
 
 .nav-link:hover { background: var(--bg-card); color: var(--text-primary); }
 .nav-link.active { background: var(--accent-dim); color: var(--accent); }
-.nav-link-logout { color: var(--text-muted); margin-left: var(--space-2); }
+.nav-link-logout { color: var(--text-muted); }
 .nav-link-logout:hover { color: var(--danger); background: var(--danger-bg); }
 
 .navbar-user {
   color: var(--text-primary);
   font-size: 0.95rem;
+  margin-right: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16ch;
 }
 
 /* ─── Mobile navbar: center brand, hide labels, narrow links ─────────────── */
@@ -192,6 +197,11 @@ a:hover { color: var(--accent-hover); }
   .navbar-brand { grid-column: 2; justify-self: center; }
   .navbar-links { grid-column: 3; justify-self: end; }
   .nav-link-label { display: none; }
+  /* Hug the icons to the right edge: drop horizontal padding on icon-only links. */
+  .navbar-links .nav-link { padding-left: var(--space-2); padding-right: var(--space-2); }
+  .navbar-links .nav-link:last-child { padding-right: 0; }
+  /* Truncate long usernames so the brand stays visually centered. */
+  .navbar-user { max-width: 8ch; font-size: var(--font-size-xs); }
 }
 
 .main-content-wrapper {

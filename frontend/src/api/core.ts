@@ -56,6 +56,21 @@ export function setActiveInstanceIdLocal(id: string | null): void {
   notifyActiveInstanceChange(id);
 }
 
+// ─── Same-tab instances-list change listeners ────────────────────────────────
+// Fires after any create/rename/delete/member-remove/invite-accept so that
+// every consumer of useWorkspaces (FAB, sidebar, settings card) refetches.
+
+const instancesChangedListeners = new Set<() => void>();
+
+export function notifyInstancesChanged(): void {
+  instancesChangedListeners.forEach((fn) => fn());
+}
+
+export function subscribeInstancesChanged(fn: () => void): () => void {
+  instancesChangedListeners.add(fn);
+  return () => instancesChangedListeners.delete(fn);
+}
+
 // ─── Same-tab username change listeners ──────────────────────────────────────
 
 const usernameListeners = new Set<(u: string | null) => void>();

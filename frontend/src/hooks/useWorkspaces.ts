@@ -5,6 +5,7 @@ import {
   setActiveInstance,
   setActiveInstanceIdLocal,
   subscribeActiveInstance,
+  subscribeInstancesChanged,
   getActiveInstanceId,
 } from '../api/instances';
 import { getCurrentUsername, subscribeUsername } from '../api/auth';
@@ -38,6 +39,12 @@ export function useWorkspaces() {
   useEffect(() => {
     return subscribeActiveInstance((id) => setActiveInstanceIdState(id));
   }, []);
+
+  // Same-tab propagation: refetch the list when any instance is created,
+  // renamed, deleted, or accepted via invite from elsewhere in the UI.
+  useEffect(() => {
+    return subscribeInstancesChanged(() => { void refresh(); });
+  }, [refresh]);
 
   // Track current user so isActiveOwner stays live across login/logout
   useEffect(() => {

@@ -1,7 +1,16 @@
 import { Instance } from '../types';
-import { request, rememberVersion, lastKnownVersion, subscribeActiveInstance, getActiveInstanceId, setActiveInstanceIdLocal } from './core';
+import {
+  request,
+  rememberVersion,
+  lastKnownVersion,
+  subscribeActiveInstance,
+  getActiveInstanceId,
+  setActiveInstanceIdLocal,
+  subscribeInstancesChanged,
+  notifyInstancesChanged,
+} from './core';
 
-export { subscribeActiveInstance, getActiveInstanceId, setActiveInstanceIdLocal };
+export { subscribeActiveInstance, getActiveInstanceId, setActiveInstanceIdLocal, subscribeInstancesChanged };
 
 // ─── Instances ───────────────────────────────────────────────────────────────
 
@@ -20,6 +29,7 @@ export async function getInstances(): Promise<{ instances: Instance[]; activeIns
 export async function createInstance(name: string): Promise<Instance> {
   const inst = await request<Instance>('/api/instances', { method: 'POST', body: JSON.stringify({ name }) });
   rememberVersion(`instance:${inst.id}`, inst.version ?? 1);
+  notifyInstancesChanged();
   return inst;
 }
 
@@ -34,11 +44,13 @@ export async function renameInstance(id: string, name: string): Promise<Instance
     body: JSON.stringify({ name, expectedVersion }),
   });
   rememberVersion(`instance:${inst.id}`, inst.version ?? 0);
+  notifyInstancesChanged();
   return inst;
 }
 
 export async function deleteInstance(id: string): Promise<void> {
   await request(`/api/instances/${id}`, { method: 'DELETE' });
+  notifyInstancesChanged();
 }
 
 /**
@@ -53,6 +65,7 @@ export async function removeInstanceMember(id: string, username: string): Promis
     { method: 'DELETE' },
   );
   rememberVersion(`instance:${inst.id}`, inst.version ?? 0);
+  notifyInstancesChanged();
   return inst;
 }
 

@@ -1,4 +1,4 @@
-import { API_URL, request } from './core';
+import { API_URL, request, notifyInstancesChanged } from './core';
 
 // ─── Admin invite-tokens ──────────────────────────────────────────────────────
 
@@ -53,7 +53,12 @@ export async function deleteWorkspaceInvite(instanceId: string, inviteId: string
   return request(`/api/instances/${instanceId}/invites/${encodeURIComponent(inviteId)}`, { method: 'DELETE' });
 }
 export async function acceptWorkspaceInvite(token: string): Promise<{ id: string; name: string; owner: string; members: string[]; createdAt: string }> {
-  return request('/api/instances/invites/accept', { method: 'POST', body: JSON.stringify({ token }) });
+  const res = await request<{ id: string; name: string; owner: string; members: string[]; createdAt: string }>(
+    '/api/instances/invites/accept',
+    { method: 'POST', body: JSON.stringify({ token }) },
+  );
+  notifyInstancesChanged();
+  return res;
 }
 export async function getWorkspaceInviteMeta(token: string): Promise<{ instanceName: string; ownerUsername: string; expiresAt: number; usedBy: string | null; alreadyMember: boolean }> {
   return request(`/api/instances/invites/meta?token=${encodeURIComponent(token)}`);

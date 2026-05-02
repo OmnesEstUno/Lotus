@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../utils/storage';
 
 const STORAGE_KEY = 'lotus.accessibility.v1';
@@ -34,8 +34,9 @@ function load(): AccessibilitySettings {
   const raw = storage.get(STORAGE_KEY);
   if (!raw) return defaults();
   try {
-    const parsed = JSON.parse(raw) as Partial<AccessibilitySettings>;
-    return { ...defaults(), ...parsed };
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return defaults();
+    return { ...defaults(), ...(parsed as Partial<AccessibilitySettings>) };
   } catch {
     return defaults();
   }
@@ -71,10 +72,22 @@ function applyToHtml(settings: AccessibilitySettings): void {
 export function useAccessibilitySettings() {
   const [settings, setSettings] = useState<AccessibilitySettings>(load);
 
+  const isMounted = useRef(false);
+
   useEffect(() => {
     applyToHtml(settings);
-    save(settings);
+    if (isMounted.current) {
+      save(settings);
+    } else {
+      isMounted.current = true;
+    }
   }, [settings]);
+
+  useEffect(() => {
+    return storage.subscribe((e) => {
+      if (e.key === STORAGE_KEY) setSettings(load());
+    });
+  }, []);
 
   const update = useCallback(<K extends keyof AccessibilitySettings>(
     key: K,
@@ -83,12 +96,11 @@ export function useAccessibilitySettings() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  return {
-    settings,
-    setPalette: (v: Palette) => update('palette', v),
-    setHandedness: (v: Handedness) => update('handedness', v),
-    setReduceMotion: (v: ReduceMotion) => update('reduceMotion', v),
-    setTextScale: (v: TextScale) => update('textScale', v),
-    setColorBlindCharts: (v: boolean) => update('colorBlindCharts', v),
-  };
+  const setPalette = useCallback((v: Palette) => update('palette', v), [update]);
+  const setHandedness = useCallback((v: Handedness) => update('handedness', v), [update]);
+  const setReduceMotion = useCallback((v: ReduceMotion) => update('reduceMotion', v), [update]);
+  const setTextScale = useCallback((v: TextScale) => update('textScale', v), [update]);
+  const setColorBlindCharts = useCallback((v: boolean) => update('colorBlindCharts', v), [update]);
+
+  return { settings, setPalette, setHandedness, setReduceMotion, setTextScale, setColorBlindCharts };
 }

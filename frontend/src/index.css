@@ -1386,9 +1386,9 @@ a:hover { color: var(--accent-hover); }
 
 /* ─── Workspace picker FAB (mobile-only mirror of Enter Data FAB) ───────── */
 .workspace-picker-fab-root {
+  position: relative; /* anchor for the absolutely-positioned popover list */
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 [data-handedness="right"] .workspace-picker-fab-root { align-items: flex-end; }
 [data-handedness="left"]  .workspace-picker-fab-root { align-items: flex-start; }
@@ -1430,6 +1430,8 @@ a:hover { color: var(--accent-hover); }
   font-weight: 600;
 }
 .workspace-picker-list {
+  position: absolute;
+  bottom: calc(100% + 12px); /* float 12px above the FAB; takes no space when closed */
   display: flex;
   flex-direction: column-reverse; /* anchor to bottom; first child sits closest to FAB */
   align-items: flex-end;
@@ -1550,8 +1552,8 @@ a:hover { color: var(--accent-hover); }
 }
 
 /* Workspace popover anchors to the side that matches the FAB position */
-[data-handedness="right"] .workspace-picker-list { align-items: flex-end; }
-[data-handedness="left"]  .workspace-picker-list { align-items: flex-start; }
+[data-handedness="right"] .workspace-picker-list { right: 0; align-items: flex-end; }
+[data-handedness="left"]  .workspace-picker-list { left: 0;  align-items: flex-start; }
 
 /* ─── Accessibility: reduce motion ───────────────────────────────────────── */
 [data-reduce-motion="on"] *,

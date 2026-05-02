@@ -1137,9 +1137,6 @@ a:hover { color: var(--accent-hover); }
 
 /* ─── Floating Enter Data FAB ────────────────────────────────────────────── */
 .fab-enter-data {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
   width: 96px;
   height: 96px;
   border-radius: 50%;
@@ -1157,7 +1154,6 @@ a:hover { color: var(--accent-hover); }
   font-size: var(--font-size-xs);
   text-align: center;
   line-height: 1.1;
-  z-index: var(--z-sticky);
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1390,15 +1386,12 @@ a:hover { color: var(--accent-hover); }
 
 /* ─── Workspace picker FAB (mobile-only mirror of Enter Data FAB) ───────── */
 .workspace-picker-fab-root {
-  position: fixed;
-  left: 24px;
-  bottom: 24px;
-  z-index: 100;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 12px;
 }
+[data-handedness="right"] .workspace-picker-fab-root { align-items: flex-end; }
+[data-handedness="left"]  .workspace-picker-fab-root { align-items: flex-start; }
 .fab-workspace-picker {
   width: 96px;
   height: 96px;
@@ -1535,16 +1528,29 @@ a:hover { color: var(--accent-hover); }
   .fab-workspace-picker-label {
     display: none;
   }
-  .fab-enter-data {
-    bottom: 16px;
-    right: 16px;
-  }
-  /* Tighten popover anchor so the workspace picker list still floats just above the smaller FAB. */
-  .workspace-picker-fab-root {
-    bottom: 16px;
-    left: 16px;
-  }
 }
+
+/* ─── FAB stack: holds both FABs in one positioned container ─────────────── */
+.fab-stack {
+  position: fixed;
+  bottom: 24px;
+  display: flex;
+  flex-direction: column-reverse; /* enter-data on bottom, workspaces above */
+  gap: 12px;
+  z-index: var(--z-sticky);
+}
+[data-handedness="right"] .fab-stack { right: 24px; align-items: flex-end; }
+[data-handedness="left"]  .fab-stack { left: 24px; align-items: flex-start; }
+
+@media (max-width: 639px) {
+  .fab-stack { bottom: 16px; }
+  [data-handedness="right"] .fab-stack { right: 16px; }
+  [data-handedness="left"]  .fab-stack { left: 16px; }
+}
+
+/* Workspace popover anchors to the side that matches the FAB position */
+[data-handedness="right"] .workspace-picker-list { align-items: flex-end; }
+[data-handedness="left"]  .workspace-picker-list { align-items: flex-start; }
 
 /* ─── Accessibility: reduce motion ───────────────────────────────────────── */
 [data-reduce-motion="on"] *,

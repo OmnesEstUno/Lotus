@@ -82,6 +82,11 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ─── Accessibility: text scale ──────────────────────────────────────────── */
+:root[data-text-scale="sm"] { font-size: 14px; }
+:root[data-text-scale="md"] { font-size: 16px; }
+:root[data-text-scale="lg"] { font-size: 18px; }
+
 /* ─── Accessibility palettes ─────────────────────────────────────────────── */
 [data-palette="light"] {
   --bg-base: #faf9ff;
@@ -1541,3 +1546,12 @@ a:hover { color: var(--accent-hover); }
   }
 }
 
+/* ─── Accessibility: reduce motion ───────────────────────────────────────── */
+[data-reduce-motion="on"] *,
+[data-reduce-motion="on"] *::before,
+[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

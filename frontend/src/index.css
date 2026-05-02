@@ -16,6 +16,7 @@ html, body {
   --accent:         #818cf8;
   --accent-hover:   #6366f1;
   --accent-dim:     rgba(129, 140, 248, 0.15);
+  --accent-fg:      #0f0f1a;
 
   --text-primary:   #fafafa;
   --text-secondary: #6a6faa;
@@ -88,18 +89,19 @@ html, body {
   --bg-elevated: #ede9fe;
   --border: #ddd6fe;
   --border-subtle: #ede9fe;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-dim: rgba(99, 102, 241, 0.15);
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-dim: rgba(79, 70, 229, 0.15);
+  --accent-fg: #ffffff;
   --text-primary: #1e1b4b;
   --text-secondary: #4338ca;
-  --text-muted: #6366f1;
-  --success: #16a34a;
-  --success-bg: rgba(22, 163, 74, 0.1);
+  --text-muted: #5b5ea6;
+  --success: #15803d;
+  --success-bg: rgba(21, 128, 61, 0.1);
   --danger: #dc2626;
   --danger-bg: rgba(220, 38, 38, 0.1);
-  --warning: #d97706;
-  --warning-bg: rgba(217, 119, 6, 0.1);
+  --warning: #92400e;
+  --warning-bg: rgba(146, 64, 14, 0.1);
 }
 
 [data-palette="hi-vis-dark"] {
@@ -112,6 +114,7 @@ html, body {
   --accent: #ffeb3b;
   --accent-hover: #ffc107;
   --accent-dim: rgba(255, 235, 59, 0.2);
+  --accent-fg: #0f0f1a;
   --text-primary: #ffffff;
   --text-secondary: #ffffff;
   --text-muted: #e0e0e0;
@@ -133,13 +136,14 @@ html, body {
   --accent: #4527a0;
   --accent-hover: #311b92;
   --accent-dim: rgba(69, 39, 160, 0.15);
+  --accent-fg: #ffffff;
   --text-primary: #000000;
   --text-secondary: #000000;
   --text-muted: #1a1a1a;
   --success: #1b5e20;
   --success-bg: rgba(27, 94, 32, 0.1);
-  --danger: #b71c1c;
-  --danger-bg: rgba(183, 28, 28, 0.1);
+  --danger: #a31515;
+  --danger-bg: rgba(163, 21, 21, 0.1);
   --warning: #6e4500;
   --warning-bg: rgba(110, 69, 0, 0.1);
 }
@@ -1131,7 +1135,7 @@ a:hover { color: var(--accent-hover); }
   height: 96px;
   border-radius: 50%;
   background: var(--accent);
-  color: #0f0f1a;
+  color: var(--accent-fg);
   border: none;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   cursor: pointer;
@@ -1391,7 +1395,7 @@ a:hover { color: var(--accent-hover); }
   height: 96px;
   border-radius: 50%;
   background: var(--accent);
-  color: #0f0f1a;
+  color: var(--accent-fg);
   border: none;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   cursor: pointer;

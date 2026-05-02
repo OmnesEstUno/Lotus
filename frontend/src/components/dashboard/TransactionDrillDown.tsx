@@ -4,6 +4,7 @@ import type { TransactionUpdate } from '../../api/transactions';
 import type { IncomeUpdate } from '../../api/income';
 import { formatCurrency } from '../../utils/dataProcessing/shared';
 import { getCategoryColor } from '../../utils/categorization/colors';
+import { useColorBlindMode } from '../../hooks/useColorBlindMode';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../CategorySelect';
 import NotesCell from './NotesCell';
 import RowActionsMenu from './RowActionsMenu';
@@ -59,6 +60,7 @@ export default function TransactionDrillDown({
   emptyMessage = 'No transactions found.',
   isActiveOwner = true,
 }: TransactionDrillDownProps) {
+  useColorBlindMode();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);

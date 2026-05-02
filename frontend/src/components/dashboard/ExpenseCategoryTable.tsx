@@ -6,6 +6,7 @@ import { MonthColumn } from '../../utils/dataProcessing/monthlyExpenseTable';
 import { formatCurrency } from '../../utils/dataProcessing/shared';
 import { MONTH_NAMES_SHORT } from '../../utils/dateConstants';
 import { getCategoryColor } from '../../utils/categorization/colors';
+import { useColorBlindMode } from '../../hooks/useColorBlindMode';
 import { DrillDownRange, DRILL_DOWN_RANGE_LABELS } from './constants';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 
@@ -36,6 +37,7 @@ export default function ExpenseCategoryTable({
   addCustomCategory,
   isActiveOwner = true,
 }: ExpenseCategoryTableProps) {
+  useColorBlindMode();
   const showYearSublabel = new Set(columns.map((c) => c.year)).size > 1;
   const visibleRows = expandedCategory
     ? monthlyTable.filter((r) => r.category === expandedCategory)

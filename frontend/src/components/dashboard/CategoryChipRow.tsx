@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Category } from '../../types';
 import { getCategoryColor } from '../../utils/categorization/colors';
+import { useColorBlindMode } from '../../hooks/useColorBlindMode';
 import CheckmarkToggle from '../CheckmarkToggle';
 
 export interface Chip {
@@ -36,6 +37,7 @@ export default function CategoryChipRow({
   chips, isActive, onToggle, onSelectAll, onDeselectAll,
   onHover, onLeave, opacityFor, extraActions, size = 'sm',
 }: Props) {
+  useColorBlindMode();
   const allKeys = chips.map((c) => c.key);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>

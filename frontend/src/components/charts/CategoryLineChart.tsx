@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { Category, CustomDateRange, TimeRange } from '../../types';
 import { getCategoryColor } from '../../utils/categorization/colors';
+import { useColorBlindMode } from '../../hooks/useColorBlindMode';
 import { buildLineChartData } from '../../utils/dataProcessing/lineChartData';
 import { formatCurrency, getMaxValue, getTrendingCategories } from '../../utils/dataProcessing/shared';
 import { Transaction } from '../../types';
@@ -70,6 +71,7 @@ function CustomTooltip({ active, payload, label, selectedSet }: TooltipProps<num
 
 export default function CategoryLineChart({ transactions, timeRange, customRange, onCustomRangeChange }: Props) {
   const isNarrow = useIsNarrow();
+  useColorBlindMode();
   // Derive the full category list from the current transactions so custom
   // categories appear automatically alongside built-ins.
   const allCategories = useMemo(() => getTrendingCategories(transactions), [transactions]);

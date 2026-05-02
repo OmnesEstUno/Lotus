@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../utils/storage';
 import { setColorBlindChartPalette } from '../utils/categorization/colors';
-
-const STORAGE_KEY = 'lotus.accessibility.v1';
+import { ACCESSIBILITY_STORAGE_KEY as STORAGE_KEY } from '../utils/accessibilityStorage';
 
 export type Palette = 'dark' | 'light' | 'hi-vis-dark' | 'hi-vis-light';
 export type Handedness = 'right' | 'left';

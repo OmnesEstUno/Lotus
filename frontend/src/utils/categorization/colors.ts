@@ -1,4 +1,5 @@
 import { BuiltInCategory, Category } from '../../types';
+import { ACCESSIBILITY_STORAGE_KEY } from '../accessibilityStorage';
 
 // ─── Chart Colors ───────────────────────────────────────────────────────────
 
@@ -23,7 +24,9 @@ export const CATEGORY_COLORS: Record<BuiltInCategory, string> = {
   'Other': '#71717A',
 };
 
-// Default palette used for user-created custom categories.
+// Palette used for user-created custom categories. Picked deterministically
+// based on a hash of the category name so the same name always gets the same
+// color across sessions.
 const CUSTOM_CATEGORY_PALETTE = [
   '#fb923c', // orange 400
   '#facc15', // yellow 400
@@ -53,11 +56,12 @@ const WONG_PALETTE = [
 // Module-level palette flag, kept in sync by useAccessibilitySettings.
 // Charts re-render naturally when their parent re-renders after the toggle.
 let colorBlindMode = false;
+let listeners: Array<() => void> = [];
 
 // Initialize from localStorage at module load time so first chart paint
 // uses the correct palette without waiting for React to mount.
 try {
-  const raw = localStorage.getItem('lotus.accessibility.v1');
+  const raw = localStorage.getItem(ACCESSIBILITY_STORAGE_KEY);
   if (raw) {
     const parsed = JSON.parse(raw) as { colorBlindCharts?: boolean };
     if (parsed?.colorBlindCharts === true) colorBlindMode = true;
@@ -65,7 +69,18 @@ try {
 } catch { /* defaults to false */ }
 
 export function setColorBlindChartPalette(enabled: boolean): void {
+  if (colorBlindMode === enabled) return;
   colorBlindMode = enabled;
+  for (const cb of listeners) cb();
+}
+
+export function getColorBlindMode(): boolean {
+  return colorBlindMode;
+}
+
+export function subscribeColorBlindMode(cb: () => void): () => void {
+  listeners.push(cb);
+  return () => { listeners = listeners.filter((l) => l !== cb); };
 }
 
 function hashString(s: string): number {

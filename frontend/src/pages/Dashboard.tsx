@@ -32,6 +32,7 @@ import { buildCategoryAverages } from '../utils/dataProcessing/categoryAverages'
 import { filterByRange, formatCurrency, getTrackedDuration } from '../utils/dataProcessing/shared';
 import { MONTH_NAMES_SHORT } from '../utils/dateConstants';
 import { getCategoryColor } from '../utils/categorization/colors';
+import { useColorBlindMode } from '../hooks/useColorBlindMode';
 import CategoryLineChart from '../components/charts/CategoryLineChart';
 import ExpenseCategoryTable from '../components/dashboard/ExpenseCategoryTable';
 import TimeRangeSelector from '../components/dashboard/TimeRangeSelector';
@@ -83,6 +84,7 @@ export default function Dashboard() {
 
   // Custom categories used by the edit flow
   const { userCategories, addCustomCategory } = useUserCategories();
+  useColorBlindMode();
 
   const { activeInstanceId, isActiveOwner } = useWorkspaces();
 

@@ -7,6 +7,7 @@ import { dialog } from '../utils/dialog';
 import { IncomeEntry, Transaction } from '../types';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { getCategoryColor } from '../utils/categorization/colors';
+import { useColorBlindMode } from '../hooks/useColorBlindMode';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CARD_LABELS, CardId } from '../hooks/useDashboardLayout';
@@ -91,6 +92,7 @@ function CardVisibilityRow({ id, label, checked, onToggle }: CardVisibilityRowPr
  */
 export default function Settings() {
   const { userCategories, setUserCategories, saveError } = useUserCategories();
+  useColorBlindMode();
   const currentUser = useCurrentUser();
   const { isActiveOwner, activeInstanceId } = useWorkspaces();
   const { cardOrder, setCardOrder, hidden, toggleHidden } = useDashboardLayout(activeInstanceId);

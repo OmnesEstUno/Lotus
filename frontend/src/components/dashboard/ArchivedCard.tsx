@@ -3,6 +3,7 @@ import { Transaction } from '../../types';
 import { getTransactions, updateTransaction } from '../../api/transactions';
 import { formatCurrency } from '../../utils/dataProcessing/shared';
 import { getCategoryColor } from '../../utils/categorization/colors';
+import { useColorBlindMode } from '../../hooks/useColorBlindMode';
 import { useListWithActions } from '../../hooks/useListWithActions';
 
 export default function ArchivedCard() {
@@ -11,6 +12,7 @@ export default function ArchivedCard() {
     [],
   );
   const { items: archived, loading: busy, error, runAction } = useListWithActions<Transaction>(fetchArchived);
+  useColorBlindMode();
 
   async function handleUnarchive(id: string) {
     await runAction(async () => { await updateTransaction(id, { archived: false }); });

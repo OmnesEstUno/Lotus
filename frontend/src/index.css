@@ -1409,3 +1409,26 @@ a:hover { color: var(--accent-hover); }
   -webkit-overflow-scrolling: touch;
 }
 
+/* ─── Mobile FAB sizing: halve to 48×48 and hide labels ────────────────── */
+@media (max-width: 639px) {
+  .fab-enter-data,
+  .fab-workspace-picker {
+    width: 48px;
+    height: 48px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+  .fab-enter-data-label,
+  .fab-workspace-picker-label {
+    display: none;
+  }
+  .fab-enter-data {
+    bottom: 16px;
+    right: 16px;
+  }
+  /* Tighten popover anchor so the workspace picker list still floats just above the smaller FAB. */
+  .workspace-picker-fab-root {
+    bottom: 16px;
+    left: 16px;
+  }
+}
+

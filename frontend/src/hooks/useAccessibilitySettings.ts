@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../utils/storage';
+import { setColorBlindChartPalette } from '../utils/categorization/colors';
 
 const STORAGE_KEY = 'lotus.accessibility.v1';
 
@@ -76,6 +77,7 @@ export function useAccessibilitySettings() {
 
   useEffect(() => {
     applyToHtml(settings);
+    setColorBlindChartPalette(settings.colorBlindCharts);
     if (isMounted.current) {
       save(settings);
     } else {

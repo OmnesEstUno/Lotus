@@ -2,7 +2,7 @@ import { BuiltInCategory, Category } from '../../types';
 
 // ─── Chart Colors ───────────────────────────────────────────────────────────
 
-// Curated colors for built-in categories.
+// Curated colors for built-in categories (default palette).
 export const CATEGORY_COLORS: Record<BuiltInCategory, string> = {
   'Costco': '#F59E0B',
   'Amazon': '#F97316',
@@ -23,9 +23,7 @@ export const CATEGORY_COLORS: Record<BuiltInCategory, string> = {
   'Other': '#71717A',
 };
 
-// Palette used for user-created custom categories. Picked deterministically
-// based on a hash of the category name so the same name always gets the same
-// color across sessions.
+// Default palette used for user-created custom categories.
 const CUSTOM_CATEGORY_PALETTE = [
   '#fb923c', // orange 400
   '#facc15', // yellow 400
@@ -39,6 +37,37 @@ const CUSTOM_CATEGORY_PALETTE = [
   '#10b981', // emerald 500
 ];
 
+// Wong palette (Nature Methods, 2011) — deuteranopia/protanopia/tritanopia-safe.
+// Index 7 (#000000) replaced with mid-gray to remain visible on dark backgrounds.
+const WONG_PALETTE = [
+  '#0072B2', // blue
+  '#E69F00', // orange
+  '#56B4E9', // sky
+  '#009E73', // green
+  '#F0E442', // yellow
+  '#D55E00', // vermillion
+  '#CC79A7', // purple
+  '#888888', // gray (substituted for Wong's #000000 to remain visible on dark bg)
+];
+
+// Module-level palette flag, kept in sync by useAccessibilitySettings.
+// Charts re-render naturally when their parent re-renders after the toggle.
+let colorBlindMode = false;
+
+// Initialize from localStorage at module load time so first chart paint
+// uses the correct palette without waiting for React to mount.
+try {
+  const raw = localStorage.getItem('lotus.accessibility.v1');
+  if (raw) {
+    const parsed = JSON.parse(raw) as { colorBlindCharts?: boolean };
+    if (parsed?.colorBlindCharts === true) colorBlindMode = true;
+  }
+} catch { /* defaults to false */ }
+
+export function setColorBlindChartPalette(enabled: boolean): void {
+  colorBlindMode = enabled;
+}
+
 function hashString(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) {
@@ -49,11 +78,15 @@ function hashString(s: string): number {
 }
 
 /**
- * Resolve a color for any category (built-in or custom). Built-ins use their
- * curated color from CATEGORY_COLORS; custom categories get a deterministic
- * color from the custom palette based on the name hash.
+ * Resolve a color for any category (built-in or custom). When color-blind
+ * mode is on, all categories pull deterministically from the Wong palette.
+ * Otherwise built-ins use their curated CATEGORY_COLORS color, customs hash
+ * into CUSTOM_CATEGORY_PALETTE.
  */
 export function getCategoryColor(category: Category): string {
+  if (colorBlindMode) {
+    return WONG_PALETTE[hashString(category) % WONG_PALETTE.length];
+  }
   const builtIn = (CATEGORY_COLORS as Record<string, string | undefined>)[category];
   if (builtIn) return builtIn;
   return CUSTOM_CATEGORY_PALETTE[hashString(category) % CUSTOM_CATEGORY_PALETTE.length];

@@ -43,6 +43,7 @@ html, body {
   --space-8: 2rem;
   --space-10: 2.5rem;
   --space-12: 3rem;
+  --card-padding-x: 0.25rem;
 
   /* ─── Typography scale ─────────────────────────────────────────────── */
   --font-size-xs: 0.75rem;    /* 12px @ 16px base */
@@ -221,7 +222,7 @@ a:hover { color: var(--accent-hover); }
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: var(--space-6);
+  padding: var(--space-6) var(--card-padding-x);
 }
 
 .card-header {

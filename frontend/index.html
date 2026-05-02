@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <script>
+      (function () {
+        try {
+          var s = JSON.parse(localStorage.getItem('lotus.accessibility.v1') || '{}');
+          var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+          var palette = s.palette || (prefersLight ? 'light' : 'dark');
+          var rm = s.reduceMotion || 'auto';
+          var reduce = rm === 'on' || (rm === 'auto' &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          var html = document.documentElement;
+          html.dataset.palette = palette;
+          html.dataset.handedness = s.handedness || 'right';
+          html.dataset.textScale = s.textScale || 'md';
+          if (reduce) html.dataset.reduceMotion = 'on';
+        } catch (e) { /* defaults via CSS */ }
+      })();
+    </script>
     <title>Lotus Finance</title>
   </head>
   <body>

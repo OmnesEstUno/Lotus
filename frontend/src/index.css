@@ -1079,7 +1079,7 @@ a:hover { color: var(--accent-hover); }
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
   -webkit-tap-highlight-color: transparent;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .fab-enter-data:hover {
     transform: translateY(-2px);
     background: var(--accent-hover);
@@ -1338,12 +1338,16 @@ a:hover { color: var(--accent-hover); }
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
   -webkit-tap-highlight-color: transparent;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .fab-workspace-picker:hover {
     transform: translateY(-2px);
     background: var(--accent-hover);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
   }
+}
+.fab-workspace-picker[aria-expanded="true"] {
+  background: var(--accent-hover);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
 }
 .fab-workspace-picker:active { transform: translateY(0); filter: brightness(1.15); }
 .fab-workspace-picker-label {

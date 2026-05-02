@@ -17,6 +17,7 @@ import { formatCurrency, getMaxValue, getTrendingCategories } from '../../utils/
 import { Transaction } from '../../types';
 import DateRangePicker from '../DateRangePicker';
 import CategoryChipRow from '../dashboard/CategoryChipRow';
+import { useIsNarrow } from '../../hooks/useIsNarrow';
 
 interface Props {
   transactions: Transaction[];
@@ -68,6 +69,7 @@ function CustomTooltip({ active, payload, label, selectedSet }: TooltipProps<num
 }
 
 export default function CategoryLineChart({ transactions, timeRange, customRange, onCustomRangeChange }: Props) {
+  const isNarrow = useIsNarrow();
   // Derive the full category list from the current transactions so custom
   // categories appear automatically alongside built-ins.
   const allCategories = useMemo(() => getTrendingCategories(transactions), [transactions]);
@@ -193,10 +195,12 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             Tip: Click a chip to show/hide a category. Click a data point to isolate it; click more points to compare.
           </p>
 
-          <ResponsiveContainer width="100%" height={CHART_HEIGHT_PX}>
+          <ResponsiveContainer width="100%" height={isNarrow ? 480 : CHART_HEIGHT_PX}>
             <LineChart
           data={data}
-          margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
+          margin={isNarrow
+            ? { top: 4, right: 8, left: 0, bottom: 4 }
+            : { top: 4, right: 16, left: 8, bottom: 4 }}
           onClick={(e: unknown) => {
             // Click on empty chart area clears selection
             const ev = e as { activePayload?: unknown } | null;
@@ -209,6 +213,7 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
             axisLine={{ stroke: 'var(--border)' }}
             tickLine={false}
+            interval={isNarrow ? 'preserveStartEnd' : 0}
             label={{ value: 'Time Period', position: 'insideBottom', offset: -4, fill: 'var(--text-muted)', fontSize: 11 }}
           />
           <YAxis
@@ -217,7 +222,7 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             tickLine={false}
             tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
             domain={[0, Math.ceil((maxValue * CHART_Y_AXIS_HEADROOM) / CHART_Y_TICK_STEP) * CHART_Y_TICK_STEP || 100]}
-            label={{
+            label={isNarrow ? undefined : {
               value: 'Amount ($)',
               angle: -90,
               position: 'insideLeft',

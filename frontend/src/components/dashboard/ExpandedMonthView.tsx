@@ -15,6 +15,7 @@ import { INCOME_COLOR, EXPENSE_COLOR, formatAxisCurrency } from './constants';
 import TransactionDrillDown, { DrillDownEvent } from './TransactionDrillDown';
 import MonthTotalsBar from './MonthTotalsBar';
 import CategoryChipRow from './CategoryChipRow';
+import { useIsNarrow } from '../../hooks/useIsNarrow';
 
 // ─── Monthly balance: expanded (per-month) view ────────────────────────────
 
@@ -43,6 +44,7 @@ function ExpandedMonthView({
   addCustomCategory,
   isActiveOwner = true,
 }: ExpandedMonthViewProps) {
+  const isNarrow = useIsNarrow();
   const rawEvents = buildMonthEvents(transactions, incomeEntries, year, month);
 
   // ── Task 14: day-click filter ──────────────────────────────────────────────
@@ -134,10 +136,12 @@ function ExpandedMonthView({
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: '2 1 400px' }}>
           {/* Daily trend bar chart — no surplus/deficit bars in expanded mode */}
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={isNarrow ? 360 : 280}>
             <BarChart
               data={dailyBalance}
-              margin={{ top: 4, right: 16, left: 8, bottom: 28 }}
+              margin={isNarrow
+                ? { top: 4, right: 4, left: 0, bottom: 28 }
+                : { top: 4, right: 16, left: 8, bottom: 28 }}
               onClick={(state: unknown) => {
                 const s = state as { activeLabel?: string } | null;
                 if (!s?.activeLabel) return;
@@ -156,6 +160,7 @@ function ExpandedMonthView({
                 tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
                 axisLine={{ stroke: 'var(--border)' }}
                 tickLine={false}
+                interval={isNarrow ? 'preserveStartEnd' : 0}
                 label={{ value: `Day of ${MONTH_NAMES_SHORT[month]}`, position: 'insideBottom', offset: -4, fill: 'var(--text-muted)', fontSize: 11 }}
               />
               <YAxis

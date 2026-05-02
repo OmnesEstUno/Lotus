@@ -1379,3 +1379,33 @@ a:hover { color: var(--accent-hover); }
 @media (min-width: 640px) {
   .workspace-picker-fab-root { display: none; }
 }
+
+/* ─── Category chip row ─────────────────────────────────────────────────── */
+.category-chip-row-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+@media (max-width: 639px) {
+  .category-chip-row-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    /* Allow horizontal swipe to scroll without hijacking page vertical scroll. */
+    touch-action: pan-x;
+    /* Slim scrollbar; the existing scrollbar styles already handle this. */
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .category-chip-row-chips > * {
+    flex-shrink: 0;
+  }
+}
+
+/* ─── Net balance chart horizontal scroll (all-time mode) ──────────────── */
+.net-balance-scroll--scrollable {
+  overflow-x: auto;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+}
+

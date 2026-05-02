@@ -39,7 +39,7 @@ export default function CategoryChipRow({
   const allKeys = chips.map((c) => c.key);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'center' }}>
+      <div className="category-chip-row-chips">
         {chips.map((chip) => (
           <div
             key={chip.key}

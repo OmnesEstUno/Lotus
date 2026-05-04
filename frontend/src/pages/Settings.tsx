@@ -106,11 +106,14 @@ export default function Settings() {
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
+    // Gate on active instance: GET /api/transactions and /api/income require
+    // X-Instance-Id, which isn't set until useWorkspaces resolves the active id.
+    if (!activeInstanceId) return;
     Promise.all([getTransactions(), getIncome()])
       .then(([txns, inc]) => { setTransactions(txns); setIncome(inc); })
       .catch((err) => setStatus({ kind: 'error', text: (err as Error).message }))
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeInstanceId]);
 
   // Count of transactions per category — shown next to each custom category
   const categoryCounts = new Map<string, number>();

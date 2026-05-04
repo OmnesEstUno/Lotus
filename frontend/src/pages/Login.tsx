@@ -270,7 +270,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      await verify2FA(preAuthToken, totpCode);
+      await verify2FA(preAuthToken, totpCode, oldTrustedDeviceTokenId);
       const pending = sessionStore.get(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
       if (pending) {
         sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);

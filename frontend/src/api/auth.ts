@@ -56,10 +56,14 @@ export interface Verify2FAResult {
   username: string;
 }
 
-export async function verify2FA(preAuthToken: string, totpCode: string): Promise<Verify2FAResult> {
+export async function verify2FA(
+  preAuthToken: string,
+  totpCode: string,
+  oldTrustedDeviceTokenId: string | null = null,
+): Promise<Verify2FAResult> {
   const result = await request<Verify2FAResult>('/api/auth/verify-2fa', {
     method: 'POST',
-    body: JSON.stringify({ preAuthToken, totpCode }),
+    body: JSON.stringify({ preAuthToken, totpCode, oldTrustedDeviceTokenId }),
   });
   setToken(result.token);
   storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);

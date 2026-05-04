@@ -19,7 +19,7 @@ import {
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
 import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential, beginAuthentication, finishAuthentication, userHasCredentials } from './auth/webauthn';
-import { issueTrustedDevice, rotateTrustedDevice, verifyTrustedDevice } from './auth/trustedDevice';
+import { rotateTrustedDevice, verifyTrustedDevice } from './auth/trustedDevice';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
@@ -589,7 +589,11 @@ export default {
 
       // ── Verify 2FA ──
       if (path === '/api/auth/verify-2fa' && method === 'POST') {
-        const body = await request.json() as { preAuthToken?: string; totpCode?: string };
+        const body = await request.json() as {
+          preAuthToken?: string;
+          totpCode?: string;
+          oldTrustedDeviceTokenId?: string | null;
+        };
         if (!body.preAuthToken || !body.totpCode) {
           return respond({ error: 'Missing fields.' }, 400, cors);
         }
@@ -633,7 +637,9 @@ export default {
           { authenticated: true, username, iat: now, exp: now + JWT_TTL_SECONDS },
           env.JWT_SECRET,
         );
-        const { token: trustedDeviceJwt } = await issueTrustedDevice(env.FINANCE_KV, env.JWT_SECRET, username);
+        const { token: trustedDeviceJwt } = await rotateTrustedDevice(
+          env.FINANCE_KV, env.JWT_SECRET, username, body.oldTrustedDeviceTokenId ?? null,
+        );
         return respond({ token, trustedDeviceJwt, username }, 200, cors);
       }
 

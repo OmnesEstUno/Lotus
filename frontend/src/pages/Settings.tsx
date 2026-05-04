@@ -27,6 +27,7 @@ import InviteTokensCard from '../components/InviteTokensCard';
 import ToggleSwitch from '../components/ToggleSwitch';
 import WorkspacesCard from '../components/WorkspacesCard';
 import AccessibilityCard from '../components/AccessibilityCard';
+import SecurityCard from '../components/SecurityCard';
 import ArchivedCard from '../components/dashboard/ArchivedCard';
 import DangerZone from '../components/DangerZone';
 import FeatureRequestCard from '../components/FeatureRequestCard';
@@ -444,6 +445,9 @@ export default function Settings() {
 
       {/* ─── Archived Transactions ────────────────────────── */}
       <ArchivedCard />
+
+      {/* ─── Security ─────────────────────────────────────── */}
+      <SecurityCard />
 
       {/* ─── Accessibility ────────────────────────────────── */}
       <AccessibilityCard />

@@ -50,15 +50,30 @@ export async function login(username: string, password: string): Promise<{ preAu
   });
 }
 
-export async function verify2FA(preAuthToken: string, totpCode: string): Promise<{ token: string; username: string }> {
-  const result = await request<{ token: string; username: string }>('/api/auth/verify-2fa', {
+export interface Verify2FAResult {
+  token: string;
+  trustedDeviceJwt: string;
+  username: string;
+}
+
+export async function verify2FA(preAuthToken: string, totpCode: string): Promise<Verify2FAResult> {
+  const result = await request<Verify2FAResult>('/api/auth/verify-2fa', {
     method: 'POST',
     body: JSON.stringify({ preAuthToken, totpCode }),
   });
   setToken(result.token);
+  storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
   storage.set(STORAGE_KEYS.USERNAME, result.username);
   notifyUsernameChange(result.username);
   return result;
+}
+
+export function getTrustedDeviceToken(): string | null {
+  return storage.get(STORAGE_KEYS.TRUSTED_DEVICE);
+}
+
+export function clearTrustedDeviceToken(): void {
+  storage.remove(STORAGE_KEYS.TRUSTED_DEVICE);
 }
 
 export async function logout(): Promise<void> {
@@ -66,6 +81,7 @@ export async function logout(): Promise<void> {
     await request('/api/auth/logout', { method: 'POST' });
   } finally {
     clearToken();
+    storage.remove(STORAGE_KEYS.TRUSTED_DEVICE);
     storage.remove(STORAGE_KEYS.USERNAME);
     notifyUsernameChange(null);
     storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);

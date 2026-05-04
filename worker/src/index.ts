@@ -119,7 +119,10 @@ async function authenticate(request: Request, env: Env): Promise<AuthContext | n
   try {
     const payload = await verifyJWT(auth.slice(7), env.JWT_SECRET);
     if (payload.authenticated !== true || typeof payload.username !== 'string') return null;
-    const iat = typeof payload.iat === 'number' ? payload.iat : 0;
+    // Legacy tokens (issued before iat was added) lack the claim. Treat them
+    // as freshly issued so session-age gates don't reject existing sessions
+    // at rollout — the user can still re-auth via TOTP explicitly if needed.
+    const iat = typeof payload.iat === 'number' ? payload.iat : Math.floor(Date.now() / 1000);
     return { username: payload.username, iat };
   } catch {
     return null;

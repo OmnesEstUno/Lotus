@@ -81,7 +81,12 @@ export async function logout(): Promise<void> {
     await request('/api/auth/logout', { method: 'POST' });
   } finally {
     clearToken();
-    storage.remove(STORAGE_KEYS.TRUSTED_DEVICE);
+    // Intentionally NOT removing STORAGE_KEYS.TRUSTED_DEVICE — logout ends the
+    // session but keeps the device "trusted" so the next login can skip the
+    // password step and land at the second-factor screen with username
+    // pre-filled. The trusted-device token is only cleared via the explicit
+    // "Sign in as a different account" escape hatch on the login page, or by
+    // server-side rotation on the next successful second-factor verification.
     storage.remove(STORAGE_KEYS.USERNAME);
     notifyUsernameChange(null);
     storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);

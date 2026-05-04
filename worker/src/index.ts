@@ -583,7 +583,8 @@ export default {
         );
 
         await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), username, { expirationTtl: PREAUTH_TTL_SECONDS });
-        return respond({ preAuthToken }, 200, cors);
+        const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, username);
+        return respond({ preAuthToken, hasBiometricCreds }, 200, cors);
       }
 
       // ── Verify 2FA ──

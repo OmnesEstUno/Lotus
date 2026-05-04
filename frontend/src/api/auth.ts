@@ -43,7 +43,7 @@ export async function confirmSetup(username: string, totpCode: string, setupToke
   });
 }
 
-export async function login(username: string, password: string): Promise<{ preAuthToken: string }> {
+export async function login(username: string, password: string): Promise<{ preAuthToken: string; hasBiometricCreds: boolean }> {
   return request('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),

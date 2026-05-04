@@ -30,21 +30,23 @@ export default function CollapsibleCard({
 
   return (
     <div className="card" style={cardStyle}>
-      <button
-        type="button"
-        className="collapsible-card-header"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <h2 className="collapsible-card-title" style={titleStyle}>{title}</h2>
-        {headerExtra && <span className="collapsible-card-extra">{headerExtra}</span>}
-        <span
-          className="material-symbols-outlined collapsible-card-chevron"
-          aria-hidden="true"
+      <div className="collapsible-card-header">
+        <button
+          type="button"
+          className="collapsible-card-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
         >
-          {open ? 'expand_less' : 'expand_more'}
-        </span>
-      </button>
+          <h2 className="collapsible-card-title" style={titleStyle}>{title}</h2>
+          <span
+            className="material-symbols-outlined collapsible-card-chevron"
+            aria-hidden="true"
+          >
+            {open ? 'expand_less' : 'expand_more'}
+          </span>
+        </button>
+        {headerExtra && <div className="collapsible-card-extra">{headerExtra}</div>}
+      </div>
       <div className="collapsible-card-body" hidden={!open}>
         {children}
       </div>

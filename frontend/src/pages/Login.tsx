@@ -246,8 +246,10 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      const { preAuthToken: token } = await login(username, password);
+      const { preAuthToken: token, hasBiometricCreds: hasCreds } = await login(username, password);
       setPreAuthToken(token);
+      setHasBiometricCreds(hasCreds);
+      setBiometricPrompted(false);
       setStep('login-totp');
     } catch (err) {
       console.error(err);

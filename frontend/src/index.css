@@ -1688,3 +1688,49 @@ a:hover { color: var(--accent-hover); }
 .collapsible-card-body[hidden] {
   display: none;
 }
+
+/* ─── Security card: biometric devices list ──────────────────────────────── */
+.security-credential-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.security-credential-row:first-child { border-top: none; padding-top: 0; }
+.security-credential-icon {
+  font-size: 24px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.security-credential-details {
+  flex: 1;
+  min-width: 0;
+}
+.security-credential-label {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+}
+.security-credential-meta {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: 2px;
+}
+.security-add-button {
+  margin-top: var(--space-3);
+}
+.security-empty {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-3);
+}
+.security-totp-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-3);
+}

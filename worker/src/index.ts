@@ -18,6 +18,7 @@ import {
   verifyTOTP,
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
+import { beginRegistration, finishRegistration } from './auth/webauthn';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
@@ -37,7 +38,7 @@ import {
   deleteFromAnyYear,
   yearOfISODate,
 } from './storage/paginatedYearStorage';
-import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS } from './constants';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS } from './constants';
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
@@ -45,6 +46,8 @@ export interface Env {
   JWT_SECRET: string;
   ALLOWED_ORIGIN?: string;
   ADMIN_INIT_SECRET?: string;   // optional — absence disables /api/admin/init
+  RP_ID: string;
+  RP_ORIGIN: string;
 }
 
 /** Auth context returned by authenticate(). */
@@ -664,7 +667,56 @@ export default {
       const auth = await requireAuth(request, env, cors);
       if (auth instanceof Response) return auth;
 
-      const { username } = auth;
+      const { username, iat } = auth;
+
+      // ── Biometric: register-begin ──
+      if (path === '/api/auth/biometric-register-begin' && method === 'POST') {
+        const rl = await checkAndIncrement(
+          env.FINANCE_KV,
+          KV_PREFIXES.RATELIMIT_WEBAUTHN_REGISTER(username),
+          WEBAUTHN_REGISTER_MAX_ATTEMPTS,
+          WEBAUTHN_REGISTER_LOCKOUT_SECONDS,
+        );
+        if (!rl.allowed) {
+          return respond({ error: `Too many enrollment attempts. Try again in ${Math.ceil(rl.remainingSeconds / 60)} minute(s).` }, 429, cors);
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const sessionAge = iat > 0 ? now - iat : Number.MAX_SAFE_INTEGER;
+        const body = await request.json().catch(() => ({})) as { totpCode?: string };
+
+        if (sessionAge > BIOMETRIC_REAUTH_THRESHOLD_SECONDS) {
+          if (!body.totpCode) {
+            return respond({ requiresReauth: true }, 200, cors);
+          }
+          // Verify TOTP code
+          const raw = await env.FINANCE_KV.get(KV_PREFIXES.USER(username, 'profile'));
+          if (!raw) return respond({ error: 'User not found.' }, 401, cors);
+          const profile = JSON.parse(raw) as { totpSecret: string };
+          const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
+          if (!valid) return respond({ error: 'Invalid TOTP code.' }, 401, cors);
+        }
+
+        const { options } = await beginRegistration(env.FINANCE_KV as never, username, env.RP_ID, 'Lotus');
+        return respond({ options }, 200, cors);
+      }
+
+      // ── Biometric: register-finish ──
+      if (path === '/api/auth/biometric-register-finish' && method === 'POST') {
+        const body = await request.json() as { registrationResponse?: unknown; label?: string };
+        if (!body.registrationResponse) return respond({ error: 'Missing registrationResponse.' }, 400, cors);
+
+        const result = await finishRegistration(
+          env.FINANCE_KV as never,
+          username,
+          env.RP_ID,
+          env.RP_ORIGIN,
+          body.registrationResponse as never,
+          body.label ?? 'Unnamed device',
+        );
+        if ('error' in result) return respond({ error: result.error }, 400, cors);
+        return respond({ credential: result.credential }, 200, cors);
+      }
 
       // ── Instance CRUD ──
 

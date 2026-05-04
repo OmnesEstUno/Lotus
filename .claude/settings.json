@@ -79,13 +79,38 @@
       "Read(//home/Grey/Projects/Lotus/docs/**)",
       "Read(//var/home/Grey/Projects/Lotus/docs/**)",
       "Read(//home/Grey/Projects/Lotus/frontend/src/**)",
-      "Read(//var/home/Grey/Projects/Lotus/frontend/src/**)"
+      "Read(//var/home/Grey/Projects/Lotus/frontend/src/**)",
+      "Read(//home/Grey/Projects/Lotus/**)",
+      "Read(//var/home/Grey/Projects/Lotus/**)",
+      "Read(//home/Grey/.claude/plugins/cache/superpowers-marketplace/superpowers/5.0.7/skills/subagent-driven-development/**)",
+      "Read(//var/home/Grey/.claude/plugins/cache/superpowers-marketplace/superpowers/5.0.7/skills/subagent-driven-development/**)",
+      "Bash(git -C /var/home/Grey/Projects/Lotus diff 553f255 7f1640a -- frontend/src/index.css)",
+      "Bash(python3 -)",
+      "Bash(grep -E \"#[0-9a-fA-F]{3,6}\")",
+      "Bash(git -C /var/home/Grey/Projects/Lotus branch)",
+      "Bash(git -C /var/home/Grey/Projects/Lotus show HEAD --stat)",
+      "Bash(npm audit *)",
+      "Bash(git revert *)",
+      "Bash(npm ls *)",
+      "Bash(git stash *)",
+      "Bash(git -C /var/home/Grey/Projects/Lotus add frontend/src/api/biometric.ts)",
+      "Bash(git -C /var/home/Grey/Projects/Lotus status)",
+      "Bash(gh run *)",
+      "Bash(rpm -q librsvg2-tools imagemagick)",
+      "Bash(grep -n \"data-palette.*dark.*{$\\\\|--bg-color\\\\|background-color.*#\" index.css)",
+      "Bash(magick -background none -density 600 favicon.svg -resize 410x -gravity center -background none -extent 512x512 icon-512.png)",
+      "Bash(magick icon-512.png -resize 192x192 icon-192.png)",
+      "Bash(magick icon-512.png -resize 180x180 apple-touch-icon.png)"
     ],
     "additionalDirectories": [
       "/tmp",
       "/var/home/Grey/Projects/Lotus/docs/superpowers",
       "/home/Grey/Projects/Lotus/frontend/src",
-      "/var/home/Grey/Projects/Lotus/frontend/src"
+      "/var/home/Grey/Projects/Lotus/frontend/src",
+      "/home/Grey/Projects/Lotus/docs/superpowers/specs",
+      "/var/home/Grey/Projects/Lotus/docs/superpowers/specs",
+      "/home/Grey/Projects/Lotus",
+      "/var/home/Grey/Projects/Lotus"
     ]
   }
 }

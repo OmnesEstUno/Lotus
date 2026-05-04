@@ -18,7 +18,8 @@ import {
   verifyTOTP,
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
-import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential } from './auth/webauthn';
+import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential, beginAuthentication, finishAuthentication, userHasCredentials } from './auth/webauthn';
+import { issueTrustedDevice, rotateTrustedDevice, verifyTrustedDevice } from './auth/trustedDevice';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
@@ -38,7 +39,7 @@ import {
   deleteFromAnyYear,
   yearOfISODate,
 } from './storage/paginatedYearStorage';
-import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS } from './constants';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS, WEBAUTHN_VERIFY_MAX_ATTEMPTS, WEBAUTHN_VERIFY_LOCKOUT_SECONDS, TRUSTED_DEVICE_RATELIMIT_PER_MIN } from './constants';
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
@@ -631,8 +632,8 @@ export default {
           { authenticated: true, username, iat: now, exp: now + JWT_TTL_SECONDS },
           env.JWT_SECRET,
         );
-
-        return respond({ token, username }, 200, cors);
+        const { token: trustedDeviceJwt } = await issueTrustedDevice(env.FINANCE_KV, env.JWT_SECRET, username);
+        return respond({ token, trustedDeviceJwt, username }, 200, cors);
       }
 
       // ── Logout ──
@@ -659,6 +660,112 @@ export default {
 
         const result = await migrateSingleUserToMultiTenant(env.FINANCE_KV, username);
         return respond({ ok: true, ...result }, 200, cors);
+      }
+
+      // ── Trusted-device second-factor entry ──
+      if (path === '/api/auth/trusted-second-factor' && method === 'POST') {
+        const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+        const rl = await checkAndIncrement(
+          env.FINANCE_KV,
+          KV_PREFIXES.RATELIMIT_TRUSTED_DEVICE(ip),
+          TRUSTED_DEVICE_RATELIMIT_PER_MIN,
+          60,
+        );
+        if (!rl.allowed) return respond({ error: 'Too many requests.' }, 429, cors);
+
+        const body = await request.json() as { trustedDeviceToken?: string };
+        if (!body.trustedDeviceToken) return respond({ error: 'Missing token.' }, 400, cors);
+
+        const td = await verifyTrustedDevice(env.FINANCE_KV, env.JWT_SECRET, body.trustedDeviceToken);
+        if (!td) return respond({ error: 'Trusted device token expired.' }, 401, cors);
+
+        // Issue a fresh preAuth token (matches /api/auth/login response shape).
+        const preAuthId = crypto.randomUUID();
+        const preAuthToken = await signJWT(
+          { preAuth: true, id: preAuthId, username: td.username, exp: Math.floor(Date.now() / 1000) + PREAUTH_TTL_SECONDS },
+          env.JWT_SECRET,
+        );
+        await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), td.username, { expirationTtl: PREAUTH_TTL_SECONDS });
+        const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, td.username);
+
+        return respond({ preAuthToken, username: td.username, hasBiometricCreds, oldTokenId: td.tokenId }, 200, cors);
+      }
+
+      // ── Begin biometric (returns options) ──
+      if (path === '/api/auth/biometric-authenticate-begin' && method === 'POST') {
+        const body = await request.json() as { preAuthToken?: string };
+        if (!body.preAuthToken) return respond({ error: 'Missing token.' }, 400, cors);
+        let payload: Record<string, unknown>;
+        try { payload = await verifyJWT(body.preAuthToken, env.JWT_SECRET); }
+        catch { return respond({ error: 'Session expired.' }, 401, cors); }
+        if (!payload.preAuth || typeof payload.username !== 'string') {
+          return respond({ error: 'Invalid token.' }, 401, cors);
+        }
+        const username = payload.username;
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PREAUTH(payload.id as string));
+        if (stored !== username) return respond({ error: 'Session expired.' }, 401, cors);
+
+        const { options } = await beginAuthentication(env.FINANCE_KV, username, env.RP_ID);
+        return respond({ options }, 200, cors);
+      }
+
+      // ── Verify Biometric ──
+      if (path === '/api/auth/verify-biometric' && method === 'POST') {
+        const body = await request.json() as {
+          preAuthToken?: string;
+          authenticationResponse?: unknown;
+          oldTrustedDeviceTokenId?: string | null;
+        };
+        if (!body.preAuthToken || !body.authenticationResponse) {
+          return respond({ error: 'Missing fields.' }, 400, cors);
+        }
+
+        let payload: Record<string, unknown>;
+        try { payload = await verifyJWT(body.preAuthToken, env.JWT_SECRET); }
+        catch { return respond({ error: 'Session expired. Please log in again.' }, 401, cors); }
+
+        if (!payload.preAuth || typeof payload.id !== 'string' || typeof payload.username !== 'string') {
+          return respond({ error: 'Invalid token.' }, 401, cors);
+        }
+        const username = payload.username;
+        const preAuthId = payload.id;
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PREAUTH(preAuthId));
+        if (stored !== username) return respond({ error: 'Session expired.' }, 401, cors);
+
+        const rl = await checkAndIncrement(
+          env.FINANCE_KV,
+          KV_PREFIXES.RATELIMIT_WEBAUTHN_VERIFY(username),
+          WEBAUTHN_VERIFY_MAX_ATTEMPTS,
+          WEBAUTHN_VERIFY_LOCKOUT_SECONDS,
+        );
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${rl.remainingSeconds} second(s).` }, 429, cors);
+        }
+
+        const result = await finishAuthentication(
+          env.FINANCE_KV,
+          username,
+          env.RP_ID,
+          env.RP_ORIGIN,
+          body.authenticationResponse as never,
+        );
+        if (!result.ok) return respond({ error: result.error }, 401, cors);
+
+        await clearRateLimit(env.FINANCE_KV, KV_PREFIXES.RATELIMIT_WEBAUTHN_VERIFY(username));
+        await env.FINANCE_KV.delete(KV_PREFIXES.PREAUTH(preAuthId));
+
+        // Issue session JWT
+        const now = Math.floor(Date.now() / 1000);
+        const sessionJwt = await signJWT(
+          { authenticated: true, username, iat: now, exp: now + JWT_TTL_SECONDS },
+          env.JWT_SECRET,
+        );
+        // Issue (and rotate) trusted-device JWT
+        const { token: trustedDeviceJwt } = await rotateTrustedDevice(
+          env.FINANCE_KV, env.JWT_SECRET, username, body.oldTrustedDeviceTokenId ?? null,
+        );
+
+        return respond({ token: sessionJwt, trustedDeviceJwt, username }, 200, cors);
       }
 
       // ─────────────────────────────────────────────────────────────────────

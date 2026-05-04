@@ -18,7 +18,7 @@ import {
   verifyTOTP,
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
-import { beginRegistration, finishRegistration } from './auth/webauthn';
+import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential } from './auth/webauthn';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
@@ -716,6 +716,44 @@ export default {
         );
         if ('error' in result) return respond({ error: result.error }, 400, cors);
         return respond({ credential: result.credential }, 200, cors);
+      }
+
+      // ── Biometric: list credentials ──
+      if (path === '/api/auth/biometric-credentials' && method === 'GET') {
+        const credentials = await listCredentials(env.FINANCE_KV, username);
+        return respond({ credentials }, 200, cors);
+      }
+
+      // ── Biometric: rename or delete a credential ──
+      {
+        const m = path.match(/^\/api\/auth\/biometric-credentials\/([^/]+)$/);
+        if (m && method === 'PATCH') {
+          const credentialId = decodeURIComponent(m[1]);
+          const body = await request.json() as { label?: string };
+          if (!body.label || typeof body.label !== 'string') {
+            return respond({ error: 'Missing label.' }, 400, cors);
+          }
+          const credential = await getCredential(env.FINANCE_KV, username, credentialId);
+          if (!credential) return respond({ error: 'Credential not found.' }, 404, cors);
+          credential.label = body.label.trim().slice(0, 64) || 'Unnamed device';
+          await putCredential(env.FINANCE_KV, username, credential);
+          return respond({
+            credential: {
+              credentialId: credential.credentialId,
+              label: credential.label,
+              deviceType: credential.deviceType,
+              createdAt: credential.createdAt,
+              lastUsedAt: credential.lastUsedAt,
+            },
+          }, 200, cors);
+        }
+
+        if (m && method === 'DELETE') {
+          const credentialId = decodeURIComponent(m[1]);
+          const removed = await deleteCredential(env.FINANCE_KV, username, credentialId);
+          if (!removed) return respond({ error: 'Credential not found.' }, 404, cors);
+          return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...cors } });
+        }
       }
 
       // ── Instance CRUD ──

@@ -180,14 +180,20 @@ export default function SecurityCard() {
           </div>
         </form>
       ) : (
-        <button
-          className="btn btn-primary security-add-button"
-          onClick={() => handleAdd()}
-          disabled={busy || !supported}
-          title={supported ? '' : 'This device does not support biometric authentication.'}
-        >
-          {busy ? <span className="spinner" /> : '+ Add this device'}
-        </button>
+        <>
+          <button
+            className="btn btn-primary security-add-button"
+            onClick={() => handleAdd()}
+            disabled={busy || !supported}
+          >
+            {busy ? <span className="spinner" /> : '+ Add this device'}
+          </button>
+          {!supported && (
+            <p className="security-empty" style={{ marginTop: 8 }}>
+              This device doesn't support biometric authentication.
+            </p>
+          )}
+        </>
       )}
     </CollapsibleCard>
   );

@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { startAuthentication } from '@simplewebauthn/browser';
@@ -63,6 +63,7 @@ export default function Login() {
   const [hasBiometricCreds, setHasBiometricCreds] = useState(false);
   const [oldTrustedDeviceTokenId, setOldTrustedDeviceTokenId] = useState<string | null>(null);
   const [biometricPrompted, setBiometricPrompted] = useState(false);
+  const biometricCancelledRef = useRef(false);
 
   useEffect(() => {
     if (isAuthenticated()) {
@@ -123,10 +124,14 @@ export default function Login() {
   }, [step, hasBiometricCreds]);
 
   async function runBiometric(): Promise<void> {
+    biometricCancelledRef.current = false;
     try {
       const { options } = await authenticateBegin(preAuthToken);
+      if (biometricCancelledRef.current) return;
       const assertion = await startAuthentication({ optionsJSON: options });
+      if (biometricCancelledRef.current) return;
       const result = await verifyBiometric(preAuthToken, assertion, oldTrustedDeviceTokenId);
+      if (biometricCancelledRef.current) return;
       storage.set(STORAGE_KEYS.TOKEN, result.token);
       storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
       storage.set(STORAGE_KEYS.USERNAME, result.username);
@@ -621,7 +626,11 @@ export default function Login() {
               <button
                 type="button"
                 className="btn btn-ghost w-full"
-                onClick={() => { setHasBiometricCreds(false); setBiometricPrompted(true); }}
+                onClick={() => {
+                  biometricCancelledRef.current = true;
+                  setHasBiometricCreds(false);
+                  setBiometricPrompted(true);
+                }}
                 style={{ marginTop: 8 }}
               >
                 Use authenticator code instead
@@ -631,6 +640,7 @@ export default function Login() {
               type="button"
               className="btn btn-ghost w-full"
               onClick={() => {
+                biometricCancelledRef.current = true;
                 clearTrustedDeviceToken();
                 setUsername('');
                 setPassword('');

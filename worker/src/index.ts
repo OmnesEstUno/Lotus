@@ -778,16 +778,6 @@ export default {
 
       // ── Biometric: register-begin ──
       if (path === '/api/auth/biometric-register-begin' && method === 'POST') {
-        const rl = await checkAndIncrement(
-          env.FINANCE_KV,
-          KV_PREFIXES.RATELIMIT_WEBAUTHN_REGISTER(username),
-          WEBAUTHN_REGISTER_MAX_ATTEMPTS,
-          WEBAUTHN_REGISTER_LOCKOUT_SECONDS,
-        );
-        if (!rl.allowed) {
-          return respond({ error: `Too many enrollment attempts. Try again in ${Math.ceil(rl.remainingSeconds / 60)} minute(s).` }, 429, cors);
-        }
-
         const now = Math.floor(Date.now() / 1000);
         const sessionAge = iat > 0 ? now - iat : Number.MAX_SAFE_INTEGER;
         const body = await request.json().catch(() => ({})) as { totpCode?: string };
@@ -796,12 +786,21 @@ export default {
           if (!body.totpCode) {
             return respond({ requiresReauth: true }, 200, cors);
           }
-          // Verify TOTP code
           const raw = await env.FINANCE_KV.get(KV_PREFIXES.USER(username, 'profile'));
           if (!raw) return respond({ error: 'User not found.' }, 401, cors);
           const profile = JSON.parse(raw) as { totpSecret: string };
           const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
           if (!valid) return respond({ error: 'Invalid TOTP code.' }, 401, cors);
+        }
+
+        const rl = await checkAndIncrement(
+          env.FINANCE_KV,
+          KV_PREFIXES.RATELIMIT_WEBAUTHN_REGISTER(username),
+          WEBAUTHN_REGISTER_MAX_ATTEMPTS,
+          WEBAUTHN_REGISTER_LOCKOUT_SECONDS,
+        );
+        if (!rl.allowed) {
+          return respond({ error: `Too many enrollment attempts. Try again in ${Math.ceil(rl.remainingSeconds / 60)} minute(s).` }, 429, cors);
         }
 
         const { options } = await beginRegistration(env.FINANCE_KV, username, env.RP_ID, 'Lotus');
@@ -822,6 +821,7 @@ export default {
           body.label ?? 'Unnamed device',
         );
         if ('error' in result) return respond({ error: result.error }, 400, cors);
+        await clearRateLimit(env.FINANCE_KV, KV_PREFIXES.RATELIMIT_WEBAUTHN_REGISTER(username));
         return respond({ credential: result.credential }, 200, cors);
       }
 

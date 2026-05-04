@@ -17,6 +17,8 @@ export function defaultDeviceLabel(userAgent: string = navigator.userAgent): str
 }
 
 function detectBrowser(ua: string): string | null {
+  if (/CriOS\//i.test(ua)) return 'Chrome';
+  if (/FxiOS\//i.test(ua)) return 'Firefox';
   if (/Edg\//i.test(ua)) return 'Edge';
   if (/OPR\//i.test(ua)) return 'Opera';
   if (/Firefox\//i.test(ua)) return 'Firefox';

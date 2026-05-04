@@ -697,7 +697,7 @@ export default {
           if (!valid) return respond({ error: 'Invalid TOTP code.' }, 401, cors);
         }
 
-        const { options } = await beginRegistration(env.FINANCE_KV as never, username, env.RP_ID, 'Lotus');
+        const { options } = await beginRegistration(env.FINANCE_KV, username, env.RP_ID, 'Lotus');
         return respond({ options }, 200, cors);
       }
 
@@ -707,7 +707,7 @@ export default {
         if (!body.registrationResponse) return respond({ error: 'Missing registrationResponse.' }, 400, cors);
 
         const result = await finishRegistration(
-          env.FINANCE_KV as never,
+          env.FINANCE_KV,
           username,
           env.RP_ID,
           env.RP_ORIGIN,

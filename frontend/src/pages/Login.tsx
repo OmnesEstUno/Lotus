@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
+import { startAuthentication } from '@simplewebauthn/browser';
 import {
   getSetupStatus,
   initSetup,
@@ -9,11 +10,19 @@ import {
   verify2FA,
   migrateLegacy,
   isAuthenticated,
+  getTrustedDeviceToken,
+  clearTrustedDeviceToken,
 } from '../api/auth';
+import { notifyUsernameChange } from '../api/core';
+import {
+  trustedSecondFactor,
+  authenticateBegin,
+  verifyBiometric,
+} from '../api/biometric';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
 import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
-import { sessionStore } from '../utils/storage';
+import { storage, sessionStore } from '../utils/storage';
 
 type Step =
   | 'loading'
@@ -51,6 +60,9 @@ export default function Login() {
   const [inviteToken, setInviteToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [hasBiometricCreds, setHasBiometricCreds] = useState(false);
+  const [oldTrustedDeviceTokenId, setOldTrustedDeviceTokenId] = useState<string | null>(null);
+  const [biometricPrompted, setBiometricPrompted] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated()) {
@@ -62,26 +74,74 @@ export default function Login() {
     const match = hash.match(/[?&]token=([^&]+)/);
     if (match) {
       let decoded: string;
-      try { decoded = decodeURIComponent(match[1]); } catch { /* malformed token — fall through to normal flow */ return; }
+      try { decoded = decodeURIComponent(match[1]); }
+      catch { return; }
       setInviteToken(decoded);
       setStep('setup-password');
-      // Clear the token from the URL bar but keep the router on a valid route
       history.replaceState(null, '', window.location.pathname + window.location.search + '#/signup');
       return;
     }
-    getSetupStatus()
-      .then(({ initialized, migrationPending }) => {
-        if (migrationPending) {
-          setStep('migrate');
-        } else {
-          setStep(initialized ? 'login-password' : 'setup-password');
-        }
-      })
-      .catch(() => {
-        setError('Could not connect to the server. Please check that the Worker is deployed and the API URL is configured correctly.');
-        setStep('login-password');
-      });
+
+    const trustedToken = getTrustedDeviceToken();
+    const continueToInit = () => {
+      getSetupStatus()
+        .then(({ initialized, migrationPending }) => {
+          if (migrationPending) setStep('migrate');
+          else setStep(initialized ? 'login-password' : 'setup-password');
+        })
+        .catch(() => {
+          setError('Could not connect to the server. Please check that the Worker is deployed and the API URL is configured correctly.');
+          setStep('login-password');
+        });
+    };
+
+    if (trustedToken) {
+      trustedSecondFactor(trustedToken)
+        .then(({ preAuthToken, username, hasBiometricCreds, oldTokenId }) => {
+          setUsername(username);
+          setPreAuthToken(preAuthToken);
+          setHasBiometricCreds(hasBiometricCreds);
+          setOldTrustedDeviceTokenId(oldTokenId);
+          setStep('login-totp');
+        })
+        .catch(() => {
+          clearTrustedDeviceToken();
+          continueToInit();
+        });
+    } else {
+      continueToInit();
+    }
   }, [navigate]);
+
+  useEffect(() => {
+    if (step !== 'login-totp') return;
+    if (!hasBiometricCreds) return;
+    if (biometricPrompted) return;
+    setBiometricPrompted(true);
+    void runBiometric();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, hasBiometricCreds]);
+
+  async function runBiometric(): Promise<void> {
+    try {
+      const { options } = await authenticateBegin(preAuthToken);
+      const assertion = await startAuthentication({ optionsJSON: options });
+      const result = await verifyBiometric(preAuthToken, assertion, oldTrustedDeviceTokenId);
+      storage.set(STORAGE_KEYS.TOKEN, result.token);
+      storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
+      storage.set(STORAGE_KEYS.USERNAME, result.username);
+      notifyUsernameChange(result.username);
+      const pending = sessionStore.get(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
+      if (pending) {
+        sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
+        window.location.hash = `#/workspace-invite?token=${encodeURIComponent(pending)}`;
+        return;
+      }
+      navigate('/dashboard');
+    } catch {
+      // user cancelled or device declined; remain on TOTP screen silently
+    }
+  }
 
   // ── Back button helper ──
 
@@ -527,35 +587,65 @@ export default function Login() {
 
         {/* Login Step 2: 2FA */}
         {step === 'login-totp' && (
-          <form onSubmit={handleVerify2FA} className="login-form">
-            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              Enter the 6-digit code from your authenticator app.
-            </p>
-            <div className="form-group">
-              <label className="form-label">Authentication code</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                className="input"
-                value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="000000"
-                autoComplete="one-time-code"
-                style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
-                autoFocus
-              />
-            </div>
-            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
-              {loading ? <span className="spinner" /> : 'Verify'}
-            </button>
+          <>
+            <form onSubmit={handleVerify2FA} className="login-form">
+              <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                Enter the 6-digit code from your authenticator app.
+              </p>
+              <div className="form-group">
+                <label className="form-label">Authentication code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className="input"
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  autoComplete="one-time-code"
+                  style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
+                  autoFocus
+                />
+              </div>
+              <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+                {loading ? <span className="spinner" /> : 'Verify'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost w-full"
+                onClick={() => { setStep('setup-password'); setError(''); }}
+              >
+                Sign up
+              </button>
+            </form>
+            {hasBiometricCreds && (
+              <button
+                type="button"
+                className="btn btn-ghost w-full"
+                onClick={() => { setHasBiometricCreds(false); setBiometricPrompted(true); }}
+                style={{ marginTop: 8 }}
+              >
+                Use authenticator code instead
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-ghost w-full"
-              onClick={() => { setStep('setup-password'); setError(''); }}
+              onClick={() => {
+                clearTrustedDeviceToken();
+                setUsername('');
+                setPassword('');
+                setTotpCode('');
+                setPreAuthToken('');
+                setHasBiometricCreds(false);
+                setOldTrustedDeviceTokenId(null);
+                setBiometricPrompted(false);
+                setError('');
+                setStep('login-password');
+              }}
             >
-              Sign up
+              Sign in as a different account
             </button>
-          </form>
+          </>
         )}
       </div>
     </div>

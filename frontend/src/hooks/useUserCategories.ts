@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { UserCategories, CategoryMapping, Category, BUILT_IN_CATEGORIES } from '../types';
 import { getUserCategories, saveUserCategories } from '../api/categories';
-import { ConflictError } from '../api/core';
+import { ConflictError, getActiveInstanceId, subscribeActiveInstance } from '../api/core';
 import { derivePattern } from '../utils/categorization/rules';
 
 /**
@@ -19,20 +19,43 @@ export function useUserCategories() {
   });
   const [saveError, setSaveError] = useState<string | null>(null);
   const loaded = useRef(false);
+  // Suppresses the first save effect after a successful load — that change
+  // came from the server, not the user, and re-saving it would either be a
+  // no-op or a 409 if the server's version moved (e.g., another tab wrote).
+  const skipNextSave = useRef(false);
 
+  // Load gated on active instance: the GET requires X-Instance-Id, so we
+  // can't fire it until useWorkspaces (or a prior session) has set one.
+  // Subscribes so a freshly logged-in user gets their categories as soon
+  // as the active instance becomes available.
   useEffect(() => {
-    getUserCategories()
-      .then((data) => {
-        setUserCategories(data);
-        loaded.current = true;
-      })
-      .catch(() => {
-        loaded.current = true;
-      });
+    let cancelled = false;
+    const tryLoad = () => {
+      if (loaded.current) return;
+      if (!getActiveInstanceId()) return;
+      getUserCategories()
+        .then((data) => {
+          if (cancelled) return;
+          skipNextSave.current = true;
+          setUserCategories(data);
+          loaded.current = true;
+        })
+        .catch(() => {
+          if (cancelled) return;
+          loaded.current = true;
+        });
+    };
+    tryLoad();
+    const unsub = subscribeActiveInstance(() => tryLoad());
+    return () => { cancelled = true; unsub(); };
   }, []);
 
   useEffect(() => {
     if (!loaded.current) return;
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
     saveUserCategories(userCategories).catch(async (err) => {
       if (err instanceof ConflictError) {
         // Refresh our local copy from the server so the version map is updated,

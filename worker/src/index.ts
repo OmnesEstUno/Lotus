@@ -38,6 +38,7 @@ import {
   yearOfISODate,
 } from './storage/paginatedYearStorage';
 import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS } from './constants';
+import type { KVNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
   FINANCE_KV: KVNamespace;

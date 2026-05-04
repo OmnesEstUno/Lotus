@@ -1,4 +1,3 @@
-import type { KVNamespace } from '@cloudflare/workers-types';
 import { signJWT, verifyJWT } from './crypto';
 import { KV_PREFIXES, TRUSTED_DEVICE_TTL_SECONDS } from '../constants';
 

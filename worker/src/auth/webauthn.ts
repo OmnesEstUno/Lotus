@@ -1,4 +1,3 @@
-import type { KVNamespace } from '@cloudflare/workers-types';
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,

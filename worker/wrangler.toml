@@ -9,6 +9,10 @@ id = "ddbca44da4b548c8b9d918d542475468"
 
 [vars]
 ALLOWED_ORIGIN = "https://omnesestuno.github.io"
+# WebAuthn relying party: replace with your production domain before deploy.
+# RP_ID is the host (no scheme, no path); RP_ORIGIN is the full origin.
+RP_ID = "omnesestuno.github.io"
+RP_ORIGIN = "https://omnesestuno.github.io"
 
 # Secrets (set via `wrangler secret put <NAME>`):
 #   JWT_SECRET            — signing key for session tokens

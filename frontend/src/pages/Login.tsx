@@ -21,6 +21,7 @@ import {
 } from '../api/biometric';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
+import RateLimitMessage from '../components/RateLimitMessage';
 import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
 import { storage, sessionStore } from '../utils/storage';
 
@@ -374,7 +375,7 @@ export default function Login() {
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            {error}
+            <RateLimitMessage message={error} />
           </div>
         )}
 

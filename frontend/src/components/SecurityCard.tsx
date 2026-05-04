@@ -1,6 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { startRegistration } from '@simplewebauthn/browser';
 import CollapsibleCard from './CollapsibleCard';
+import RateLimitMessage from './RateLimitMessage';
 import {
   listCredentials,
   registerBegin,
@@ -152,7 +153,7 @@ export default function SecurityCard() {
         </div>
       )}
 
-      {error && <div className="alert alert-danger" style={{ marginTop: 12 }}>{error}</div>}
+      {error && <div className="alert alert-danger" style={{ marginTop: 12 }}><RateLimitMessage message={error} /></div>}
 
       {reauthOpen ? (
         <form onSubmit={handleReauthSubmit} className="security-totp-prompt">

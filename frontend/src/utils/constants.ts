@@ -25,6 +25,7 @@ export const CHART_Y_TICK_STEP = 50;
 // ── Storage keys ─────────────────────────────────────────────────────────
 export const STORAGE_KEYS = {
   TOKEN: 'ft_token',
+  TRUSTED_DEVICE: 'ft_trusted_device',
   USERNAME: 'ft_username',
   ACTIVE_INSTANCE: 'ft_active_instance',
   PENDING_WORKSPACE_INVITE: 'ft_pending_workspace_invite',

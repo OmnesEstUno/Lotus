@@ -47,7 +47,7 @@ export interface Env {
 }
 
 /** Auth context returned by authenticate(). */
-type AuthContext = { username: string };
+interface AuthContext { username: string; iat: number }
 
 // ─── Instance type ────────────────────────────────────────────────────────────
 
@@ -119,7 +119,8 @@ async function authenticate(request: Request, env: Env): Promise<AuthContext | n
   try {
     const payload = await verifyJWT(auth.slice(7), env.JWT_SECRET);
     if (payload.authenticated !== true || typeof payload.username !== 'string') return null;
-    return { username: payload.username };
+    const iat = typeof payload.iat === 'number' ? payload.iat : 0;
+    return { username: payload.username, iat };
   } catch {
     return null;
   }
@@ -618,8 +619,9 @@ export default {
         await clearRateLimit(env.FINANCE_KV, totpLimitKey);
         await env.FINANCE_KV.delete(KV_PREFIXES.PREAUTH(preAuthId));
 
+        const now = Math.floor(Date.now() / 1000);
         const token = await signJWT(
-          { authenticated: true, username, exp: Math.floor(Date.now() / 1000) + JWT_TTL_SECONDS },
+          { authenticated: true, username, iat: now, exp: now + JWT_TTL_SECONDS },
           env.JWT_SECRET,
         );
 

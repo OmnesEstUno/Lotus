@@ -1,4 +1,4 @@
-export const JWT_TTL_SECONDS = 86400 * 7;
+export const JWT_TTL_SECONDS = 86400; // 1 day
 export const PREAUTH_TTL_SECONDS = 300;
 export const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const WORKSPACE_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;

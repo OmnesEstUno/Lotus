@@ -1210,10 +1210,10 @@ export default {
           added.push({ ...t, notes: t.notes ?? '', id: generateId() });
         }
 
-        const txPrefix = instanceKey(instanceId, 'data:transactions');
-        for (const tx of added) {
-          await upsertInYear<Transaction>(env.FINANCE_KV, txPrefix, tx);
-        }
+        // Single batched write (one KV put per touched year + one index put)
+        // instead of N×upsertInYear, which exhausts the subrequest budget on
+        // large CSV imports.
+        await saveTransactions(env.FINANCE_KV, instanceId, [...existing, ...added]);
         return respond({ added: added.length, skipped }, 200, cors);
       }
 

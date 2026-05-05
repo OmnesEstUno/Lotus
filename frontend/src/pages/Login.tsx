@@ -18,6 +18,7 @@ import {
   trustedSecondFactor,
   authenticateBegin,
   verifyBiometric,
+  isBiometricEnrolledLocally,
 } from '../api/biometric';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
@@ -118,6 +119,12 @@ export default function Login() {
   useEffect(() => {
     if (step !== 'login-totp') return;
     if (!hasBiometricCreds) return;
+    // Only auto-prompt if THIS device has previously enrolled a credential for
+    // this user. Server's hasBiometricCreds tells us whether the account has
+    // any credential on any device — without this gate, fresh devices would
+    // launch the OS credential manager (which on Android offers Google PM,
+    // suggesting a passkey enrollment instead of using the local biometric).
+    if (!isBiometricEnrolledLocally(username.trim().toLowerCase())) return;
     if (biometricPrompted) return;
     setBiometricPrompted(true);
     void runBiometric();

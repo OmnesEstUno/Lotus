@@ -27,6 +27,12 @@ export const STORAGE_KEYS = {
   TOKEN: 'ft_token',
   TRUSTED_DEVICE: 'ft_trusted_device',
   USERNAME: 'ft_username',
+  // JSON array of usernames who have enrolled a biometric credential
+  // *on this device*. Server's `hasBiometricCreds` flag tells us whether
+  // ANY device has one; this localStorage hint tells us whether THIS one
+  // has — used to avoid auto-prompting WebAuthn on devices that will
+  // immediately fail (and trigger the OS credential-manager fallback).
+  BIOMETRIC_LOCAL_USERS: 'ft_biometric_local_users',
   ACTIVE_INSTANCE: 'ft_active_instance',
   PENDING_WORKSPACE_INVITE: 'ft_pending_workspace_invite',
   DASHBOARD_ORDER: (instanceId: string) => `dashboard:cardOrder:${instanceId}`,

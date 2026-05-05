@@ -1,6 +1,11 @@
 // ─── Crypto: PBKDF2 password hashing ─────────────────────────────────────────
 
-const PBKDF2_ITERATIONS = 600_000;
+// Cloudflare Workers' Web Crypto runtime rejects PBKDF2 above 100_000
+// iterations with `NotSupportedError: iteration counts above 100000 are
+// not supported`. The OWASP recommendation of 600_000 cannot be used here.
+// 100_000 SHA-256 iterations + a TOTP second factor + login rate limits
+// is the operating point we get to choose.
+const PBKDF2_ITERATIONS = 100_000;
 const PBKDF2_LEGACY_ITERATIONS = 100_000;
 
 function bytesToHex(u8: Uint8Array): string {

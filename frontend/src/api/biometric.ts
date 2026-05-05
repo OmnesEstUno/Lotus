@@ -1,4 +1,6 @@
 import { request } from './core';
+import { storage } from '../utils/storage';
+import { STORAGE_KEYS } from '../utils/constants';
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -90,4 +92,29 @@ export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
   if (typeof window === 'undefined' || !window.PublicKeyCredential) return false;
   try { return await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }
   catch { return false; }
+}
+
+function readLocalEnrolledUsers(): string[] {
+  const raw = storage.get(STORAGE_KEYS.BIOMETRIC_LOCAL_USERS);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function markBiometricEnrolledLocally(username: string): void {
+  if (!username) return;
+  const users = readLocalEnrolledUsers();
+  if (!users.includes(username)) {
+    users.push(username);
+    storage.set(STORAGE_KEYS.BIOMETRIC_LOCAL_USERS, JSON.stringify(users));
+  }
+}
+
+export function isBiometricEnrolledLocally(username: string): boolean {
+  if (!username) return false;
+  return readLocalEnrolledUsers().includes(username);
 }

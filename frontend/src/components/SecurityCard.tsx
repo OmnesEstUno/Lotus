@@ -9,8 +9,10 @@ import {
   renameCredential,
   deleteCredential,
   isPlatformAuthenticatorAvailable,
+  markBiometricEnrolledLocally,
   type CredentialSummary,
 } from '../api/biometric';
+import { getCurrentUsername } from '../api/auth';
 import { defaultDeviceLabel } from '../utils/webauthnUserAgent';
 import { dialog } from '../utils/dialog';
 
@@ -66,6 +68,8 @@ export default function SecurityCard() {
       const attestation = await startRegistration({ optionsJSON: begin.options });
       const label = defaultDeviceLabel();
       const { credential } = await registerFinish(attestation, label);
+      const currentUsername = getCurrentUsername();
+      if (currentUsername) markBiometricEnrolledLocally(currentUsername);
       setCredentials((prev) => [credential, ...prev]);
       setReauthOpen(false);
       setTotpCode('');

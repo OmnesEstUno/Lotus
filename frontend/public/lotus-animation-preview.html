@@ -227,28 +227,48 @@
       return Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
     }
 
+    function radiusOf(pt) {
+      return Math.hypot(pt.x - cx, pt.y - cy);
+    }
+
     const pair1Angle = angleOf(MAJOR_STARTS[13]); // ≈ +22.7618°
 
-    // ===== Bloom-rotation derivation (corrected) ==============================
+    // ===== Symmetric-bloom radii =============================================
+    // The bloomed flower is perfectly symmetric: all 5 pairs end at the SAME
+    // radius from pivot. The user has chosen pair 5's at-rest radius
+    // (≈ 40.15) as the bloom radius, so pair 5 stays exactly at its at-rest
+    // position and pairs 1-4 each translate radially INWARD from the canonical
+    // radius (≈ 46.51, path13's M-distance) to the target radius.
+    //
+    // We do NOT scale the petal shape — only translate. The canonical shape
+    // size is preserved; petals end at a slightly smaller circle.
+    const canonicalRadius = radiusOf(MAJOR_STARTS[13]); // ≈ 46.5080
+    const targetRadius    = radiusOf(MAJOR_STARTS[14]); // ≈ 40.1522
+    const deltaRadius     = canonicalRadius - targetRadius; // ≈ 6.3557
+
+    // ===== Bloom-rotation derivation (symmetric, anchored on pair 5) ==========
     // The morph target for pairs 1-4 is path13's canonical `d` (and path16 for
-    // the minor). At the end of the morph, every pair's geometry has been
-    // interpolated to the canonical petal — which lives at angle pair1Angle
-    // (≈ +22.76°) from the pivot. So the group rotation must take the MORPHED
-    // position (at pair1Angle) to the desired target, not the at-rest position.
+    // the minor). At the end of the morph, every pair's geometry is the
+    // canonical petal — which lives at angle pair1Angle (≈ +22.76°) and radius
+    // canonicalRadius (≈ 46.51) from the pivot. So we must
+    //   (a) rotate the group around pivot by (bloomedAngle - pair1Angle) so the
+    //       petal lands at the right ANGLE, and
+    //   (b) translate radially inward by deltaRadius along the bloomedAngle so
+    //       the petal lands at the right RADIUS.
     //
-    //   group_rotation = ((targetAngle - pair1Angle) mod 360 + 360) mod 360
+    // Pair 5 is the cascade ANCHOR — it does not rotate or translate at the
+    // group level. Its morph target d is path13/path16 PRE-rotated AND
+    // PRE-translated so the morph itself lands pair 5 exactly at its at-rest
+    // position (no group transform needed).
     //
-    // Pair 5 is the cascade ANCHOR — it does not rotate. It stays at its at-rest
-    // angle (+153.7259°) and the other pairs spread CW from there at 72° steps.
-    //
-    // Targets (CW from pair 5):
+    // Bloomed angles (CW from pair 5):
     //   Pair 5: +153.7259°  (anchor — equals its currentAngle)
     //   Pair 4: +225.7259°
     //   Pair 3: +297.7259°
     //   Pair 2: +369.7259° (= +9.7259°)
-    //   Pair 1: +81.7259°
+    //   Pair 1: +441.7259° (= +81.7259°)
     const PAIR5_ANGLE = angleOf(MAJOR_STARTS[14]); // ≈ +153.7259°
-    const TARGET_BY_IDX = {
+    const BLOOMED_ANGLE_BY_IDX = {
       5: PAIR5_ANGLE,
       4: PAIR5_ANGLE + 72,
       3: PAIR5_ANGLE + 144,
@@ -259,35 +279,49 @@
     const blooms = PAIRS.map(p => {
       const start = MAJOR_STARTS[p.major];
       const current = angleOf(start);
-      const target = TARGET_BY_IDX[p.idx];
-      // Strict-CW delta in [0, 360). For pair 5 this is computed but UNUSED as
-      // a group rotation — pair 5 doesn't rotate. Instead the same value (≈
-      // 130.96°) is used to PRE-ROTATE pair 5's canonical morph target so the
-      // morph fills in at pair 5's at-rest position (no angular jump).
-      const delta = ((target - pair1Angle) % 360 + 360) % 360;
-      return { ...p, currentAngle: current, targetAngle: target, deltaDeg: delta };
+      const bloomedAngle = BLOOMED_ANGLE_BY_IDX[p.idx];
+      // Strict-CW rotation in [0, 360). For pair 5 this is computed but UNUSED
+      // as a group rotation — pair 5 doesn't rotate. Instead the same value
+      // (≈ 130.96°) is used to PRE-ROTATE pair 5's canonical morph target.
+      const rotDeg = ((bloomedAngle - pair1Angle) % 360 + 360) % 360;
+      // Radial inward translation, applied at the bloomed angle.
+      // tx = −Δr · cos(bloomedAngle), ty = −Δr · sin(bloomedAngle)
+      const rad = bloomedAngle * Math.PI / 180;
+      const tx = -deltaRadius * Math.cos(rad);
+      const ty = -deltaRadius * Math.sin(rad);
+      return {
+        ...p,
+        currentAngle: current,
+        bloomedAngle,
+        deltaDeg: rotDeg,
+        translate: { x: tx, y: ty },
+      };
     });
 
-    // ===== Pair 5's pre-rotated canonical morph targets =======================
+    // ===== Pair 5's pre-rotated + pre-translated canonical morph targets ======
     // Rigid rotation of every coordinate in path13's d (and path16's d) by
-    // θ = pair5 deltaDeg ≈ +130.9641° around the pivot (cx, cy).
+    // θ = pair5 deltaDeg ≈ +130.9641° around the pivot (cx, cy), THEN translate
+    // by pair5's translate vector (≈ +5.70, −2.81). Together this lands the
+    // canonical petal at pair 5's at-rest M-coord (path14: 45.87, 112.05).
     //
     // SVG path command structure (after the "M x y" prefix, the rest is "c"
     // cubics with relative control deltas + an absolute(ish) endpoint pair —
     // actually all relative). Lowercase c is relative; uppercase C is absolute.
     // Lowercase m after the first M is also relative.
     //
-    // To rotate the path:
-    //   - Absolute coords (M, L, C with uppercase OR the implicit M-coord at
-    //     start): translate to pivot-frame, rotate, translate back.
-    //   - Relative coords (m, l, c with lowercase, including the deltas inside
-    //     each cubic): rotate the delta vector with no translation.
+    // Transform rules:
+    //   - Absolute coords (M, L, C uppercase OR the implicit M-coord at start):
+    //     translate to pivot-frame, rotate, translate back to world; then add
+    //     the translation vector (tx, ty).
+    //   - Relative coords (m, l, c lowercase, including the deltas inside
+    //     each cubic): rotate the delta vector. DO NOT translate — deltas don't
+    //     shift under translation (they're displacement vectors, not positions).
     //
     // Both REAUTHORED[13] and REAUTHORED[16] start with "M x y" then a series
     // of "c dx1 dy1 dx2 dy2 dx dy" tuples and a trailing "z". We parse the
     // command stream, rotate absolute or relative coord-pairs as appropriate,
-    // and rebuild the d-string.
-    function rotatePathD(d, deg, pivotX, pivotY) {
+    // translate absolute coords only, and rebuild the d-string.
+    function rotateAndTranslatePathD(d, deg, pivotX, pivotY, tx, ty) {
       const rad = deg * Math.PI / 180;
       const cos = Math.cos(rad);
       const sin = Math.sin(rad);
@@ -295,8 +329,8 @@
         const dx = x - pivotX;
         const dy = y - pivotY;
         return [
-          pivotX + dx * cos - dy * sin,
-          pivotY + dx * sin + dy * cos,
+          pivotX + dx * cos - dy * sin + tx,
+          pivotY + dx * sin + dy * cos + ty,
         ];
       };
       const rotRel = (dx, dy) => [
@@ -371,29 +405,43 @@
       return parts.join(" ");
     }
 
-    const PAIR5_PREROTATE_DEG = blooms.find(b => b.idx === 5).deltaDeg; // ≈ 130.9641°
-    const PAIR5_MAJOR_D = rotatePathD(REAUTHORED[13], PAIR5_PREROTATE_DEG, cx, cy);
-    const PAIR5_MINOR_D = rotatePathD(REAUTHORED[16], PAIR5_PREROTATE_DEG, cx, cy);
+    const PAIR5 = blooms.find(b => b.idx === 5);
+    const PAIR5_PREROTATE_DEG = PAIR5.deltaDeg; // ≈ 130.9641°
+    const PAIR5_TX = PAIR5.translate.x;          // ≈ +5.6991
+    const PAIR5_TY = PAIR5.translate.y;          // ≈ −2.8135
+    const PAIR5_MAJOR_D = rotateAndTranslatePathD(
+      REAUTHORED[13], PAIR5_PREROTATE_DEG, cx, cy, PAIR5_TX, PAIR5_TY);
+    const PAIR5_MINOR_D = rotateAndTranslatePathD(
+      REAUTHORED[16], PAIR5_PREROTATE_DEG, cx, cy, PAIR5_TX, PAIR5_TY);
 
-    // ===== Cascade timing (corrected — pair 1 leads) ==========================
-    // - t = 0   : pair 1 begins rotating CW.        Pair 2 begins morphing.
-    // - t = T   : pair 1's motion completes.        Pair 2 begins rotating CW.   Pair 3 begins morphing.
-    // - t = 2T  : pair 2's motion completes.        Pair 3 begins rotating CW.   Pair 4 begins morphing.
-    // - t = 3T  : pair 3's motion completes.        Pair 4 begins rotating CW.   Pair 5 begins morphing (no rotation).
-    // - t = 4T  : pair 4 + pair 5 morph complete. Bloom done.
+    // ===== Cascade timing (overlapping — pair 1 leads) ========================
+    // Each pair starts BEFORE the previous one finishes, so the cascade reads
+    // as a continuous wave rather than four discrete movements. With:
+    //   D = motion duration per pair (rotate + translate)
+    //   δ = cascade delay (each pair starts δ after the previous, while it's
+    //       still moving — δ < D produces overlap)
+    //   M = morph duration per pair (= D)
     //
-    // Each pair's rotation duration is exactly T (regardless of delta size — we
-    // intentionally vary angular velocity per pair so motions fit cleanly back
-    // to back without overlap, the simpler choreography the user specified).
-    // Total bloom = 4T. With T = 0.3s, total bloom = 1.2s.
-    const T = 0.3;
-    const BLOOM_TOTAL_S = 4 * T; // 1.2s
-    const ROTATION_BEGIN_BY_IDX = { 1: 0, 2: T, 3: 2 * T, 4: 3 * T };
-    const MORPH_BEGIN_BY_IDX    = { 2: 0, 3: T, 4: 2 * T, 5: 3 * T };
+    // - t = 0.00s:  pair 1 begins rotating + translating.    Pair 2 begins morphing.
+    // - t = δ:      pair 2 begins rotating + translating.    Pair 3 begins morphing.
+    //               (pair 1 still moving until D)
+    // - t = 2δ:     pair 3 begins rotating + translating.    Pair 4 begins morphing.
+    // - t = 3δ:     pair 4 begins rotating + translating.    Pair 5 begins morphing.
+    // - t = 3δ+D:   pair 4's motion completes. Bloom done; spin begins.
+    //
+    // Total bloom = 3δ + D. With D = 0.40s and δ = 0.25s, total bloom = 1.15s.
+    const D = 0.4;   // motion (and morph) duration per pair
+    const DELTA_S = 0.25;  // cascade delay; D > DELTA_S means each pair overlaps the next
+    const BLOOM_TOTAL_S = 3 * DELTA_S + D; // 1.15s — t at which pair 4 finishes
+    const MOTION_BEGIN_BY_IDX = { 1: 0, 2: DELTA_S, 3: 2 * DELTA_S, 4: 3 * DELTA_S };
+    // Each pair's morph begins one cascade-step BEFORE its own motion (i.e.
+    // during the previous pair's motion). For pair 2 that's t=0; for pair 5
+    // there's no motion at all so its morph begins at 3δ.
+    const MORPH_BEGIN_BY_IDX  = { 2: 0, 3: DELTA_S, 4: 2 * DELTA_S, 5: 3 * DELTA_S };
     function timingFor(idx) {
-      const beginMotionS = ROTATION_BEGIN_BY_IDX[idx]; // undefined for pair 5
-      const beginMorphS  = MORPH_BEGIN_BY_IDX[idx];    // undefined for pair 1
-      return { beginMotionS, durMotionS: T, beginMorphS, durMorphS: T };
+      const beginMotionS = MOTION_BEGIN_BY_IDX[idx]; // undefined for pair 5
+      const beginMorphS  = MORPH_BEGIN_BY_IDX[idx];  // undefined for pair 1
+      return { beginMotionS, durMotionS: D, beginMorphS, durMorphS: D };
     }
 
     // ===== Build the SVG ======================================================
@@ -419,20 +467,47 @@
     // For each pair, create a <g class="pair"> that holds:
     //   - the major path with an <animate> from reauthored -> canonical
     //   - the minor path with an <animate> from reauthored -> canonical
-    //   - an <animateTransform> rotate that runs the bloom delta over T seconds
-    //     with an ease-out cubic.
-    // The rotation is applied to the <g> so the entire pair (major + minor)
-    // moves together and the petal interpolation happens in pair-local coords.
+    //   - TWO <animateTransform> elements (translate radially inward + rotate
+    //     around pivot), composed via additive="sum" so they apply together.
+    // Both transforms run with identical begin/dur values (synchronized) so the
+    // pair group rotates and translates as a single motion over D seconds.
+    //
+    // === Critical: document-order of the two animateTransforms ================
+    // We want the effective per-point composition: rotate canonical petal first
+    // around pivot to its bloomed angle, THEN translate it radially inward in
+    // world coordinates. The translation vector (tx, ty) is computed in world
+    // space at the bloomed angle, so it MUST be applied AFTER the rotation
+    // places the petal at the bloomed angle.
+    //
+    // In SVG, transform="A B" means matrix A·B; for a point p the world position
+    // is A·B·p. So B (the right-most token) is applied FIRST to the point. To
+    // get "rotate first, then translate" in point-application order, the SVG
+    // string must read "translate(tx ty) rotate(R cx cy)" — translate is on the
+    // LEFT of the string, rotate is on the RIGHT.
+    //
+    // additive="sum" semantics: when a second animateTransform is sum-additive
+    // on the same attribute, the resulting transform string is
+    // "<first-anim> <second-anim>" (the second is post-multiplied to the right).
+    // So to produce "translate(tx ty) rotate(R cx cy)", the document order is:
+    //   1. <animateTransform type="translate" ...>             (first, replace-mode)
+    //   2. <animateTransform type="rotate" ... additive="sum"> (second, sum-mode)
+    //
+    // (NOTE: this differs from a commonly-quoted "rotate then translate-with-sum"
+    // example. That order produces "rotate(R) translate(T)" which in SVG
+    // semantics means TRANSLATE-FIRST-then-rotate when applied to a point —
+    // i.e. the translation gets rotated by R, which is the wrong geometry.)
     //
     // Cascade timing (pair 1 leads — see comments above for derivation):
-    //   - t = 0   : pair 1 rotates;             pair 2 morphs.
-    //   - t = T   : pair 2 rotates;             pair 3 morphs.
-    //   - t = 2T  : pair 3 rotates;             pair 4 morphs.
-    //   - t = 3T  : pair 4 rotates;             pair 5 morphs (no rotation).
+    //   - t = 0:   pair 1 rotates+translates;       pair 2 morphs.
+    //   - t = δ:   pair 2 rotates+translates;       pair 3 morphs.
+    //   - t = 2δ:  pair 3 rotates+translates;       pair 4 morphs.
+    //   - t = 3δ:  pair 4 rotates+translates;       pair 5 morphs (no motion).
+    // Each pair's motion begins while the previous is still in flight, so the
+    // cascade reads as a continuous wave.
     //
-    // Pair 5 is special: it does NOT rotate. Its morph target is path13/path16
-    // PRE-ROTATED to its at-rest angle (+153.73°) so it fills in without
-    // sliding angularly.
+    // Pair 5 is special: it does NOT rotate or translate at the group level.
+    // Its morph target is path13/path16 PRE-rotated AND PRE-translated so it
+    // fills in directly at its at-rest position.
     //
     // ease-out cubic via `keySplines="0.25 0.1 0.25 1"` and `calcMode="spline"`.
     const CANONICAL_MAJOR_D = REAUTHORED[13];
@@ -454,7 +529,7 @@
       g.appendChild(majorPath);
 
       // Pair 1 has no morph (path13 IS canonical); pairs 2-5 morph to canonical
-      // (or pre-rotated canonical, in pair 5's case).
+      // (or pre-rotated+translated canonical, in pair 5's case).
       if (b.idx !== 1) {
         const aD = document.createElementNS(SVG_NS, "animate");
         aD.setAttribute("attributeName", "d");
@@ -489,30 +564,61 @@
         minorPath.appendChild(aDm);
       }
 
-      // Bloom rotation transform on the pair group.
-      // Pair 5 doesn't rotate (its morph target is already pre-rotated to the
-      // anchor position). Pairs 1-4 each rotate over T seconds.
+      // Bloom motion: translate radially inward + rotate around pivot, on the
+      // pair group, composed via additive="sum". Pair 5 doesn't move at the
+      // group level (its morph target encodes its final position).
+      //
+      // Order is intentional: translate first (replace-mode), rotate second
+      // (additive=sum). This produces the SVG string "translate(tx ty)
+      // rotate(R cx cy)", which when applied to a point p computes
+      // translate(rotate(p)) — i.e. rotate the petal to bloomed angle first,
+      // THEN translate it radially inward in world space. See the long
+      // explanation block above the loop for details.
       if (b.idx !== 5) {
-        const at = document.createElementNS(SVG_NS, "animateTransform");
-        at.setAttribute("attributeName", "transform");
-        at.setAttribute("type", "rotate");
-        at.setAttribute("from", `0 ${cx} ${cy}`);
-        at.setAttribute("to", `${b.deltaDeg} ${cx} ${cy}`);
-        at.setAttribute("dur", `${t.durMotionS.toFixed(4)}s`);
-        at.setAttribute("begin", `${t.beginMotionS.toFixed(4)}s`);
-        at.setAttribute("fill", "freeze");
-        at.setAttribute("calcMode", "spline");
-        at.setAttribute("keyTimes", "0;1");
-        at.setAttribute("keySplines", EASE_OUT_SPLINE);
-        g.appendChild(at);
+        // 1) Translate radially inward by Δr along the bloomed angle.
+        //    Document-order FIRST so it ends up on the LEFT of the SVG
+        //    transform string (i.e. applied second to the point, which means
+        //    AFTER the rotation has placed the petal at the bloomed angle).
+        const aTr = document.createElementNS(SVG_NS, "animateTransform");
+        aTr.setAttribute("attributeName", "transform");
+        aTr.setAttribute("type", "translate");
+        aTr.setAttribute("from", "0 0");
+        aTr.setAttribute("to", `${b.translate.x.toFixed(4)} ${b.translate.y.toFixed(4)}`);
+        aTr.setAttribute("dur", `${t.durMotionS.toFixed(4)}s`);
+        aTr.setAttribute("begin", `${t.beginMotionS.toFixed(4)}s`);
+        aTr.setAttribute("fill", "freeze");
+        aTr.setAttribute("calcMode", "spline");
+        aTr.setAttribute("keyTimes", "0;1");
+        aTr.setAttribute("keySplines", EASE_OUT_SPLINE);
+        g.appendChild(aTr);
+
+        // 2) Rotate around pivot by the CW bloom delta. Document-order SECOND
+        //    with additive="sum" so it post-multiplies onto the translate,
+        //    landing on the RIGHT of the SVG transform string (applied first
+        //    to the point — rotates the petal from canonical to bloomed angle).
+        const aRot = document.createElementNS(SVG_NS, "animateTransform");
+        aRot.setAttribute("attributeName", "transform");
+        aRot.setAttribute("type", "rotate");
+        aRot.setAttribute("from", `0 ${cx} ${cy}`);
+        aRot.setAttribute("to", `${b.deltaDeg} ${cx} ${cy}`);
+        aRot.setAttribute("dur", `${t.durMotionS.toFixed(4)}s`);
+        aRot.setAttribute("begin", `${t.beginMotionS.toFixed(4)}s`);
+        aRot.setAttribute("fill", "freeze");
+        aRot.setAttribute("additive", "sum");
+        aRot.setAttribute("calcMode", "spline");
+        aRot.setAttribute("keyTimes", "0;1");
+        aRot.setAttribute("keySplines", EASE_OUT_SPLINE);
+        g.appendChild(aRot);
       }
 
-      // Reduce-motion: when active, force the bloomed pose. Pair 5 stays at the
-      // identity transform (its morph target already encodes the anchor angle);
-      // pairs 1-4 receive a static rotate.
+      // Reduce-motion: when active, force the bloomed pose. Pair 5 has the
+      // identity transform (its morph target already encodes the anchor
+      // position). Pairs 1-4 receive a static "translate(...) rotate(...)"
+      // matching the animated composition (translate on the LEFT, rotate on
+      // the RIGHT — see the explanation above the loop).
       const bloomEnd = b.idx === 5
         ? `rotate(0 ${cx} ${cy})`
-        : `rotate(${b.deltaDeg} ${cx} ${cy})`;
+        : `translate(${b.translate.x.toFixed(4)} ${b.translate.y.toFixed(4)}) rotate(${b.deltaDeg} ${cx} ${cy})`;
       g.setAttribute("data-bloom-end", bloomEnd);
 
       // Overlay: a second copy of the original (un-reauthored) path, in green,
@@ -626,35 +732,54 @@
     // Print computed pivot + per-pair bloom math.
     log("=== Lotus animation prototype ===");
     log(`Pivot (centroid of major-path start points): cx=${cx.toFixed(4)}, cy=${cy.toFixed(4)}`);
-    log(`pair1Angle = ${pair1Angle.toFixed(4)}°  (path13's M-point angle from pivot)`);
-    log(`PAIR5_ANGLE = ${PAIR5_ANGLE.toFixed(4)}°  (anchor — pair 5 stays here)`);
+    log(`pair1Angle  = ${pair1Angle.toFixed(4)}°   (path13's M-point angle from pivot)`);
+    log(`PAIR5_ANGLE = ${PAIR5_ANGLE.toFixed(4)}°  (anchor — pair 5 stays at its at-rest position)`);
     log("");
-    log("Pair angles + bloom rotation (degrees, SVG coordinate space — +Y is down,");
-    log("so +rotation is clockwise on screen). Formula: ((target - pair1Angle) mod 360 + 360) mod 360.");
-    log("Pair 1 LEADS the cascade. Pair 5 is the anchor and does NOT rotate (its delta is used");
-    log("only to PRE-ROTATE pair 5's morph target so the morph fills in at the anchor angle).");
+    log("Symmetric bloom radii (programmatically computed from path M-coords):");
+    log(`  canonicalRadius = |path13.M − pivot| = ${canonicalRadius.toFixed(4)}  (the canonical petal lives here)`);
+    log(`  targetRadius    = |path14.M − pivot| = ${targetRadius.toFixed(4)}  (all 5 pairs end here in bloom)`);
+    log(`  deltaRadius     = canonicalRadius − targetRadius = ${deltaRadius.toFixed(4)}  (radial inward translation magnitude)`);
+    log("");
+    log("Per-pair bloom rotation + translation (rotation around pivot, then radial");
+    log("inward translation by deltaRadius along the bloomedAngle). Pair 5 anchors the");
+    log("cascade and does NOT animate at the group level — its morph target encodes both");
+    log("the rotation and the translation directly.");
+    log("Rotation formula: ((bloomedAngle − pair1Angle) mod 360 + 360) mod 360 (strict-CW).");
+    log("Translation formula: (−deltaRadius·cos(bloomedAngle), −deltaRadius·sin(bloomedAngle)).");
     for (const b of blooms) {
-      const note = b.idx === 5 ? "  (NOT a group rotation — pair 5 doesn't rotate; used to pre-rotate morph target)" : "";
-      log(`  Pair ${b.idx} (major=path${b.major}, minor=path${b.minor}): current=${b.currentAngle.toFixed(4)}°  target=${b.targetAngle.toFixed(4)}°  cwDelta=${b.deltaDeg.toFixed(4)}°${note}`);
+      const note = b.idx === 5
+        ? "  (NOT a group transform — pair 5 doesn't move; used to PRE-rotate+PRE-translate morph target)"
+        : "";
+      log(`  Pair ${b.idx} (major=path${b.major}, minor=path${b.minor}):`);
+      log(`     current=${b.currentAngle.toFixed(4)}°  bloomed=${b.bloomedAngle.toFixed(4)}°  cwRotation=${b.deltaDeg.toFixed(4)}°${note}`);
+      log(`     translate=(${b.translate.x.toFixed(4)}, ${b.translate.y.toFixed(4)})`);
     }
     log("");
-    log("Pair 5 pre-rotated canonical M-points (sanity check: should land near pair 5's at-rest");
-    log("M-points (path14: 45.87, 112.05) and (path15: 47.96, 100.95) — within a few units):");
+    log("Pair 5 pre-rotated+translated canonical M-points (sanity check: pair 5's major");
+    log("MUST land within ~0.5 units of path14.M (45.87, 112.05); minor near path15.M");
+    log("(47.96, 100.95) — major+minor are kept rigid so minor offset is expected):");
     function firstMOf(d) {
       const m = d.match(/^\s*M\s*(-?\d*\.?\d+(?:e[-+]?\d+)?)\s+(-?\d*\.?\d+(?:e[-+]?\d+)?)/);
       return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]) } : null;
     }
     const m5major = firstMOf(PAIR5_MAJOR_D);
     const m5minor = firstMOf(PAIR5_MINOR_D);
-    log(`  Pre-rotated path13 M = (${m5major.x.toFixed(4)}, ${m5major.y.toFixed(4)})  vs  path14 M = (45.87, 112.05)`);
-    log(`  Pre-rotated path16 M = (${m5minor.x.toFixed(4)}, ${m5minor.y.toFixed(4)})  vs  path15 M = (47.96, 100.95)`);
+    const m5majorDist = Math.hypot(m5major.x - 45.87, m5major.y - 112.05);
+    const m5minorDist = Math.hypot(m5minor.x - 47.96, m5minor.y - 100.95);
+    log(`  Pre-transformed path13 M = (${m5major.x.toFixed(4)}, ${m5major.y.toFixed(4)})  vs  path14 M = (45.87, 112.05)  Δ = ${m5majorDist.toFixed(4)} units`);
+    log(`  Pre-transformed path16 M = (${m5minor.x.toFixed(4)}, ${m5minor.y.toFixed(4)})  vs  path15 M = (47.96, 100.95)  Δ = ${m5minorDist.toFixed(4)} units`);
+    if (m5majorDist > 0.5) {
+      log(`  WARNING: pair 5 major M is ${m5majorDist.toFixed(4)} units from path14.M — should be within 0.5.`);
+    }
     log("");
-    log(`Cascade T = ${T.toFixed(4)}s  (fixed; total bloom = 4T = ${BLOOM_TOTAL_S.toFixed(4)}s)`);
+    log(`Cascade D = ${D.toFixed(4)}s (motion+morph dur per pair); δ = ${DELTA_S.toFixed(4)}s (cascade delay).`);
+    log(`Total bloom = 3δ + D = ${BLOOM_TOTAL_S.toFixed(4)}s. Each pair's motion overlaps with the next (D > δ),`);
+    log("producing a continuous wave rather than discrete steps.");
     log("Per-pair cascade timing (seconds):");
     for (const b of blooms) {
       const tt = timingFor(b.idx);
       const motionStr = b.idx === 5
-        ? "(no rotation)"
+        ? "(no group motion)"
         : `motion begin=${tt.beginMotionS.toFixed(4)}s dur=${tt.durMotionS.toFixed(4)}s`;
       const morphStr = b.idx === 1
         ? "(no morph)"
@@ -662,7 +787,7 @@
       log(`  Pair ${b.idx}: ${motionStr} | ${morphStr}`);
     }
     log("");
-    log(`Spin: dur=${SPIN_DUR_S.toFixed(4)}s/rev (1.5× original 4s), begin=${BLOOM_TOTAL_S.toFixed(4)}s.`);
+    log(`Spin: dur=${SPIN_DUR_S.toFixed(4)}s/rev (1.5× original 4s), begin=${BLOOM_TOTAL_S.toFixed(4)}s (pair 4's motion-end).`);
   </script>
 </body>
 </html>

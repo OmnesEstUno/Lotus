@@ -89,7 +89,11 @@
 
     /* Bloom + spin are both driven by SVG <animateTransform> elements (in
        viewBox user coordinates) injected by JS — see #flower below. CSS only
-       handles fade-out and the reduce-motion pulse. */
+       handles fade-out and the reduce-motion pulse.
+
+       Spin: 2.667s/revolution (= 4 / 1.5 — 1.5x faster than the original 4s)
+       starting at the moment the cascade bloom finishes. The spin's `begin`
+       attribute is set in JS based on BLOOM_TOTAL_S so they stay in sync. */
     .splash svg {
       width: 256px;
       height: auto;
@@ -225,28 +229,77 @@
 
     const pair1Angle = angleOf(MAJOR_STARTS[13]);
 
-    // Bloom-rotation derivation:
-    //   At end-of-bloom, each pair's `d` has morphed to CANONICAL_MAJOR_D, whose
-    //   M coordinate is path13's start (124.76, 112.27) — i.e., at pair1's angle.
-    //   To land pair N's start at its target angle (pair1Angle - (N-1)*72°), the
-    //   group rotation must be:  R = (target - pair1Angle) = -(N-1)*72°.
-    //   We then normalize R to its shortest-arc equivalent in [-180, 180] so each
-    //   pair takes the short way around (avoids a 288° sweep for pair 5).
+    // Bloom-rotation derivation (STRICT CW — no shortest-arc):
+    //   The user wants every petal to rotate clockwise (positive degrees in SVG
+    //   coordinate space). Each pair's total CW sweep is:
     //
-    //   The pair's `currentAngle` is informational only — at t=0 the path's d is
-    //   REAUTHORED (positioned at the pair's at-rest M coord) and the group
-    //   rotation is 0, so the petal renders at its current location. As both
-    //   the d and the rotation animate, the petal slides toward the target.
+    //     delta = ((target - current) mod 360 + 360) mod 360
+    //
+    //   where `current` is the pair's at-rest angle (atan2 of its major-path
+    //   start point relative to the pivot) and `target` is pair1Angle - (N-1)*72°.
+    //
+    //   Note: this differs from the previous implementation, which used
+    //   shortest-arc normalization to [-180, 180]. That made some pairs spin
+    //   CCW. The user has explicitly chosen strict-CW.
     const blooms = PAIRS.map(p => {
       const start = MAJOR_STARTS[p.major];
       const current = angleOf(start);
       const target = pair1Angle - (p.idx - 1) * 72;
-      let delta = target - pair1Angle;  // canonical anchor angle == pair1Angle
-      // Shortest-arc normalization to [-180, 180]
-      while (delta > 180) delta -= 360;
-      while (delta < -180) delta += 360;
+      // Strict-CW delta in [0, 360). Pair 1's target == its current, so delta == 0
+      // and pair 1 doesn't move (correct — pair 1 is the anchor).
+      let delta = ((target - current) % 360 + 360) % 360;
       return { ...p, currentAngle: current, targetAngle: target, deltaDeg: delta };
     });
+
+    // ===== Cascade timing =====================================================
+    // The bloom is now a sequential cascade rather than a concurrent rotation.
+    // - At t = 0       : pair 5 begins rotating CW. Pairs 4 and 5 begin morphing.
+    // - At t = T       : pair 4 begins rotating CW. Pair 3 begins morphing.
+    //                    (Pair 5 has now swept 72° CW, clearing pair 4's slot.)
+    // - At t = 2T      : pair 3 begins rotating CW. Pair 2 begins morphing.
+    // - At t = 3T      : pair 2 begins rotating CW.
+    // All pairs share the SAME angular velocity (72° per T seconds), so each
+    // pair's rotation duration is (deltaDeg / 72) * T.
+    //
+    // Total bloom time is the latest pair-finish time:
+    //   pair 5 finishes at  0  + delta5/72 * T
+    //   pair 4 finishes at  T  + delta4/72 * T
+    //   pair 3 finishes at  2T + delta3/72 * T
+    //   pair 2 finishes at  3T + delta2/72 * T
+    // We pick T so the latest pair-finish lands at ~1.2s (matching the previous
+    // bloom duration), then drive both the spin's begin attribute and any
+    // dependent timing from BLOOM_TOTAL_S.
+    const BLOOM_TARGET_S = 1.2;
+    const cascadeStartByIdx = { 5: 0, 4: 1, 3: 2, 2: 3 }; // in units of T
+    let latestUnitsT = 0;
+    for (const b of blooms) {
+      if (b.idx === 1) continue;
+      const startUnits = cascadeStartByIdx[b.idx];
+      const motionUnits = b.deltaDeg / 72;
+      const finishUnits = startUnits + motionUnits;
+      if (finishUnits > latestUnitsT) latestUnitsT = finishUnits;
+    }
+    // T such that latestUnitsT * T = BLOOM_TARGET_S
+    const T = BLOOM_TARGET_S / latestUnitsT;
+    const BLOOM_TOTAL_S = latestUnitsT * T; // == BLOOM_TARGET_S
+    // Per-pair timing (in seconds):
+    //   beginMotionS  = cascadeStartByIdx[idx] * T
+    //   durMotionS    = (deltaDeg / 72) * T
+    //   beginMorphS   = (idx === 5 || idx === 4) ? 0
+    //                  : (idx === 3) ? T
+    //                  : (idx === 2) ? 2T : (n/a — pair 1 doesn't morph)
+    //   durMorphS     = T (the morph fills in over one 72°-step of the cascade)
+    function timingFor(idx, deltaDeg) {
+      if (idx === 1) return null; // pair 1 is static
+      const beginMotionS = cascadeStartByIdx[idx] * T;
+      const durMotionS = (deltaDeg / 72) * T;
+      let beginMorphS;
+      if (idx === 5 || idx === 4) beginMorphS = 0;
+      else if (idx === 3) beginMorphS = T;
+      else /* idx === 2 */ beginMorphS = 2 * T;
+      const durMorphS = T;
+      return { beginMotionS, durMotionS, beginMorphS, durMorphS };
+    }
 
     // ===== Build the SVG ======================================================
     const SVG_NS = "http://www.w3.org/2000/svg";
@@ -254,32 +307,44 @@
     const svg = document.getElementById("lotusSvg");
 
     // Continuous spin: an <animateTransform> on the #flower group, rotating
-    // 0->360 around the pivot, 4s per revolution, infinite, BEGINs at 1.2s
-    // (the moment bloom finishes).
+    // 0->360 around the pivot, 2.667s per revolution (= 4 / 1.5 — 1.5x faster
+    // than the original 4s), infinite, beginning the instant the cascade bloom
+    // finishes (BLOOM_TOTAL_S, ~1.2s).
+    const SPIN_DUR_S = 4 / 1.5; // 2.6667
     const spin = document.createElementNS(SVG_NS, "animateTransform");
     spin.setAttribute("attributeName", "transform");
     spin.setAttribute("type", "rotate");
     spin.setAttribute("from", `0 ${cx} ${cy}`);
     spin.setAttribute("to", `360 ${cx} ${cy}`);
-    spin.setAttribute("dur", "4s");
-    spin.setAttribute("begin", "1.2s");
+    spin.setAttribute("dur", `${SPIN_DUR_S.toFixed(4)}s`);
+    spin.setAttribute("begin", `${BLOOM_TOTAL_S.toFixed(4)}s`);
     spin.setAttribute("repeatCount", "indefinite");
     flower.appendChild(spin);
 
     // For each pair, create a <g class="pair"> that holds:
     //   - the major path with an <animate> from reauthored -> canonical
     //   - the minor path with an <animate> from reauthored -> canonical
-    //   - an <animateTransform> rotate that runs the bloom delta over 1.2s ease-out
-    // The rotation is applied to the <g> so the entire pair (major + minor) moves
-    // together and the petal interpolation happens in pair-local coords.
+    //   - an <animateTransform> rotate that runs the bloom delta over its
+    //     own cascade-determined duration with an ease-out cubic.
+    // The rotation is applied to the <g> so the entire pair (major + minor)
+    // moves together and the petal interpolation happens in pair-local coords.
     //
-    // ease-out cubic via `keySplines="0 0 0.2 1"` and `calcMode="spline"`.
+    // Cascade timing (see comments above for derivation):
+    //   - Pair 5 starts rotating at t=0; pair 5 morph and pair 4 morph also at t=0.
+    //   - Pair 4 starts rotating at t=T;   pair 3 morph at t=T.
+    //   - Pair 3 starts rotating at t=2T;  pair 2 morph at t=2T.
+    //   - Pair 2 starts rotating at t=3T.
+    //   - All morphs run for duration T, all rotations run for (delta/72)*T.
+    //
+    // ease-out cubic via `keySplines="0.25 0.1 0.25 1"` and `calcMode="spline"`.
     const CANONICAL_MAJOR_D = REAUTHORED[13];
     const CANONICAL_MINOR_D = REAUTHORED[16];
+    const EASE_OUT_SPLINE = "0.25 0.1 0.25 1";
 
     for (const b of blooms) {
       const g = document.createElementNS(SVG_NS, "g");
       g.setAttribute("class", "pair pair-" + b.idx);
+      const t = timingFor(b.idx, b.deltaDeg); // null for pair 1
 
       // Major path
       const majorPath = document.createElementNS(SVG_NS, "path");
@@ -292,12 +357,12 @@
         aD.setAttribute("attributeName", "d");
         aD.setAttribute("from", REAUTHORED[b.major]);
         aD.setAttribute("to", CANONICAL_MAJOR_D);
-        aD.setAttribute("dur", "1.2s");
-        aD.setAttribute("begin", "0s");
+        aD.setAttribute("dur", `${t.durMorphS.toFixed(4)}s`);
+        aD.setAttribute("begin", `${t.beginMorphS.toFixed(4)}s`);
         aD.setAttribute("fill", "freeze");
         aD.setAttribute("calcMode", "spline");
         aD.setAttribute("keyTimes", "0;1");
-        aD.setAttribute("keySplines", "0 0 0.2 1");
+        aD.setAttribute("keySplines", EASE_OUT_SPLINE);
         majorPath.appendChild(aD);
       }
 
@@ -312,30 +377,33 @@
         aDm.setAttribute("attributeName", "d");
         aDm.setAttribute("from", REAUTHORED[b.minor]);
         aDm.setAttribute("to", CANONICAL_MINOR_D);
-        aDm.setAttribute("dur", "1.2s");
-        aDm.setAttribute("begin", "0s");
+        aDm.setAttribute("dur", `${t.durMorphS.toFixed(4)}s`);
+        aDm.setAttribute("begin", `${t.beginMorphS.toFixed(4)}s`);
         aDm.setAttribute("fill", "freeze");
         aDm.setAttribute("calcMode", "spline");
         aDm.setAttribute("keyTimes", "0;1");
-        aDm.setAttribute("keySplines", "0 0 0.2 1");
+        aDm.setAttribute("keySplines", EASE_OUT_SPLINE);
         minorPath.appendChild(aDm);
       }
 
       // Bloom rotation transform on the pair group.
       // Rotate around (cx, cy) so each petal swings around the lotus base.
-      // For pair1 the delta is 0 — but emit a no-op for symmetry.
-      const at = document.createElementNS(SVG_NS, "animateTransform");
-      at.setAttribute("attributeName", "transform");
-      at.setAttribute("type", "rotate");
-      at.setAttribute("from", `0 ${cx} ${cy}`);
-      at.setAttribute("to", `${b.deltaDeg} ${cx} ${cy}`);
-      at.setAttribute("dur", "1.2s");
-      at.setAttribute("begin", "0s");
-      at.setAttribute("fill", "freeze");
-      at.setAttribute("calcMode", "spline");
-      at.setAttribute("keyTimes", "0;1");
-      at.setAttribute("keySplines", "0 0 0.2 1");
-      g.appendChild(at);
+      // Pair 1 has deltaDeg=0 and never moves — we skip emitting an animateTransform
+      // for it entirely (the previous "no-op for symmetry" wasted SMIL time).
+      if (b.idx !== 1) {
+        const at = document.createElementNS(SVG_NS, "animateTransform");
+        at.setAttribute("attributeName", "transform");
+        at.setAttribute("type", "rotate");
+        at.setAttribute("from", `0 ${cx} ${cy}`);
+        at.setAttribute("to", `${b.deltaDeg} ${cx} ${cy}`);
+        at.setAttribute("dur", `${t.durMotionS.toFixed(4)}s`);
+        at.setAttribute("begin", `${t.beginMotionS.toFixed(4)}s`);
+        at.setAttribute("fill", "freeze");
+        at.setAttribute("calcMode", "spline");
+        at.setAttribute("keyTimes", "0;1");
+        at.setAttribute("keySplines", EASE_OUT_SPLINE);
+        g.appendChild(at);
+      }
 
       // Reduce-motion: when active, force the bloomed pose by adding a static
       // transform attribute. The animate elements are display:none'd via CSS so
@@ -465,18 +533,24 @@
     log(`Pivot (centroid of major-path start points): cx=${cx.toFixed(4)}, cy=${cy.toFixed(4)}`);
     log("");
     log("Pair angles + bloom rotation (degrees, SVG coordinate space — +Y is down,");
-    log("so +rotation is clockwise on screen):");
+    log("so +rotation is clockwise on screen). All deltas are STRICT CW in [0, 360):");
     for (const b of blooms) {
-      log(`  Pair ${b.idx} (major=path${b.major}, minor=path${b.minor}): current=${b.currentAngle.toFixed(4)}°  target=${b.targetAngle.toFixed(4)}°  groupRotation=${b.deltaDeg.toFixed(4)}°  (${b.deltaDeg >= 0 ? "CW" : "CCW"})`);
+      log(`  Pair ${b.idx} (major=path${b.major}, minor=path${b.minor}): current=${b.currentAngle.toFixed(4)}°  target=${b.targetAngle.toFixed(4)}°  cwDelta=${b.deltaDeg.toFixed(4)}°`);
     }
     log("");
-    log("Group rotations use shortest-arc equivalent of -(N-1)*72°. Pair 4 & 5");
-    log("end up rotating CW (+144° / +72°) because that's the short way around;");
-    log("pairs 2 & 3 rotate CCW (-72° / -144°). This produces a symmetric bloom");
-    log("about the pair-1 anchor instead of every pair sweeping CCW the long way.");
+    log(`Cascade T = ${T.toFixed(4)}s  (chosen so latest pair-finish lands at ~${BLOOM_TARGET_S}s)`);
+    log(`Total bloom = ${BLOOM_TOTAL_S.toFixed(4)}s  (latestUnitsT = ${latestUnitsT.toFixed(4)} × T)`);
+    log("Per-pair cascade timing (seconds):");
+    for (const b of blooms) {
+      if (b.idx === 1) {
+        log(`  Pair 1: static (anchor — never moves, never morphs)`);
+        continue;
+      }
+      const tt = timingFor(b.idx, b.deltaDeg);
+      log(`  Pair ${b.idx}: motion begin=${tt.beginMotionS.toFixed(4)}s dur=${tt.durMotionS.toFixed(4)}s | morph begin=${tt.beginMorphS.toFixed(4)}s dur=${tt.durMorphS.toFixed(4)}s`);
+    }
     log("");
-    log("If the spec wanted strictly-CW rotation for every pair, flip pair 4/5");
-    log("group rotations to -216°/-288° respectively (long way around).");
+    log(`Spin: dur=${SPIN_DUR_S.toFixed(4)}s/rev (1.5× original 4s), begin=${BLOOM_TOTAL_S.toFixed(4)}s.`);
   </script>
 </body>
 </html>

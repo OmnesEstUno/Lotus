@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lotus animation prototype</title>
+  <!--
+    Lotus splash animation prototype (Task 1).
+    Standalone HTML — no React, no build step. Open at /lotus-animation-preview.html
+    via the Vite dev server to evaluate the visual.
+
+    Cross-browser note: per the design spec the main risk is Safari's historical
+    weakness with SVG <animate attributeName="d"> path interpolation. Tested in
+    whichever browsers are available locally; Safari verification is deferred to
+    the user (we don't have Safari available in this environment).
+  -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --fg: #f4f4f5;
+      --muted: #a1a1aa;
+      --accent: #818cf8;
+      --border: #27272a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      min-height: 100vh;
+    }
+    .controls {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 12px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      background: rgba(9, 9, 11, 0.85);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+      font-size: 14px;
+    }
+    .controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .controls button {
+      background: var(--accent);
+      color: #09090b;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .controls button:hover { opacity: 0.9; }
+    .controls .info {
+      color: var(--muted);
+      font-size: 12px;
+      margin-left: auto;
+    }
+    .controls input[type="checkbox"] {
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+
+    main {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 60px 16px 16px;
+    }
+
+    .splash {
+      transition: opacity 200ms ease-out;
+      opacity: 1;
+    }
+    .splash.fading { opacity: 0; }
+
+    /* Bloom + spin are both driven by SVG <animateTransform> elements (in
+       viewBox user coordinates) injected by JS — see #flower below. CSS only
+       handles fade-out and the reduce-motion pulse. */
+    .splash svg {
+      width: 256px;
+      height: auto;
+      display: block;
+    }
+
+    /* Reduce-motion fallback: kill all SVG animations, force bloomed pose,
+       gentle opacity pulse on the splash. */
+    html[data-reduce-motion="on"] .splash svg animate,
+    html[data-reduce-motion="on"] .splash svg animateTransform {
+      display: none;
+    }
+    @keyframes lotus-pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    html[data-reduce-motion="on"] .splash {
+      animation: lotus-pulse 2s ease-in-out infinite;
+    }
+
+    /* Visual-fidelity overlay: shows originals (green) over reauthored (red) when toggled.
+       Both at 50% opacity. At rest they should overlap perfectly.
+       SMIL animations are hidden so the at-rest layout stays stable while comparing. */
+    .splash svg .overlay { display: none; }
+    body.overlay-on .splash svg .overlay { display: inline; }
+    body.overlay-on .splash svg animate,
+    body.overlay-on .splash svg animateTransform { display: none; }
+
+    .console-out {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      padding: 8px 16px;
+      background: rgba(9, 9, 11, 0.85);
+      border-top: 1px solid var(--border);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--muted);
+      max-height: 25vh;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button id="stopBtn" type="button">Stop loading (fade out)</button>
+    <label><input type="checkbox" id="reduceMotionToggle" /> Enable reduce-motion</label>
+    <label><input type="checkbox" id="overlayToggle" /> Visual fidelity overlay (red=reauthored, green=original)</label>
+    <span class="info">Lotus splash prototype</span>
+  </div>
+
+  <main>
+    <div class="splash" id="splash">
+      <!-- The SVG is built by JS so we can keep the path-data and animation values
+           in one place (and so we can re-use the data for the overlay/diff check). -->
+      <svg
+        id="lotusSvg"
+        viewBox="0 0 180 120"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-label="Loading"
+        role="img">
+        <g id="flower" fill="#818cf8">
+          <!-- petal-pair groups injected here by JS -->
+        </g>
+      </svg>
+    </div>
+  </main>
+
+  <pre class="console-out" id="consoleOut"></pre>
+
+  <script>
+    // ===== Path data ===========================================================
+    // Reauthored paths: each has the SAME command structure as path13 (majors)
+    // or path16 (minors): "M x y c ... c ... z" with 28 cubics for majors and
+    // 19 cubics for minors. Partial paths are padded with zero-length cubics
+    // (`c 0 0 0 0 0 0`) at their last visible endpoint. SVG <animate> can
+    // interpolate the d attribute because all five major paths share structure
+    // and all five minor paths share structure.
+    const REAUTHORED = {
+      13: "M 124.76 112.27 c -0.27 -0.03 -1.13 -0.13 -1.88 -0.2 -4.38 -0.48 -9.27 -2.08 -13.2 -4.3 -2.71 -1.54 -6.79 -4.5 -7.79 -5.65 -0.33 -0.39 -0.29 -0.36 1.3 0.65 5.81 3.72 10.63 5.67 16.15 6.5 2.15 0.33 7.64 0.38 9.74 0.09 6.19 -0.87 11.67 -3.12 16.56 -6.79 1.62 -1.23 2.7 -2.12 11.44 -9.46 2.18 -1.83 4.49 -3.75 5.13 -4.25 0.65 -0.52 1.18 -1.02 1.18 -1.11 0.01 -0.1 -0.59 -0.58 -1.31 -1.08 -1.38 -0.92 -6 -4.13 -10.57 -7.33 -7.59 -5.31 -10.11 -6.74 -14.42 -8.16 -3.75 -1.23 -7.38 -1.72 -11.87 -1.6 -4.62 0.12 -7.4 0.68 -11.5 2.29 -3.33 1.31 -5.99 2.94 -11.24 6.88 -3.91 2.96 -8.18 6.1 -9.53 7.04 -1.62 1.13 7.67 -7.67 11.73 -11.11 3.75 -3.17 7.56 -5.38 11.96 -6.89 7.04 -2.44 16.08 -2.42 23.45 0.04 3.35 1.11 6.4 2.68 10.2 5.21 3.56 2.38 20.42 14.18 20.55 14.38 0.04 0.07 -3.12 2.71 -7.01 5.87 -3.89 3.16 -8.03 6.5 -9.2 7.46 -2.77 2.24 -6.36 4.95 -7.92 5.96 -1.66 1.08 -4.64 2.6 -6.52 3.32 -3.91 1.5 -7.5 2.18 -12.04 2.26 -1.59 0.04 -3.12 0.03 -3.39 0 z",
+      14: "M 45.87 112.05 c -4.89 -0.46 -9.69 -1.95 -13.92 -4.28 -2.81 -1.56 -9.14 -5.96 -19.05 -13.23 -2.13 -1.57 -4.25 -3.13 -4.7 -3.45 -0.46 -0.33 -0.81 -0.65 -0.78 -0.74 0.01 -0.07 2.67 -2.12 5.87 -4.54 11.37 -8.57 16.37 -12.07 19.93 -13.96 1.1 -0.59 2.02 -1.04 2.06 -1.01 0.03 0.04 -0.25 0.29 -0.63 0.56 -2.41 1.73 -5.34 4.25 -9.84 8.5 -2.96 2.78 -8.57 7.95 -10.11 9.3 -0.46 0.4 -0.84 0.79 -0.84 0.87 0 0.09 0.43 0.43 0.97 0.79 0.53 0.36 4.11 2.78 7.95 5.39 8.81 5.97 10.3 6.94 12.71 8.15 2.29 1.17 4.18 1.89 6.46 2.5 8.48 2.21 17.41 1.37 24.58 -2.32 2 -1.04 3.82 -2.22 8.05 -5.25 4.7 -3.38 10.6 -7.56 11.18 -7.92 1.21 -0.78 -11.29 11.18 -13.8 13.2 -5.42 4.36 -10.75 6.56 -17.86 7.38 -1.92 0.23 -6.14 0.26 -8.22 0.06 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z",
+      15: "M 47.96 100.95 c -4.31 -0.25 -8.52 -1.75 -12.74 -4.56 -1.77 -1.18 -7.36 -5.34 -8.47 -6.29 -0.183333 -0.16 -0.366667 -0.32 -0.55 -0.48 0.62 -0.456667 1.24 -0.913333 1.86 -1.37 4.53 -3.36 8.96 -6.1 12.22 -7.6 1.11 -0.49 2.03 -0.88 2.06 -0.85 0.04 0.03 -0.4 0.45 -0.98 0.91 -1.8 1.46 -3.85 3.39 -6.39 6.04 -0.816667 0.856667 -1.63333 1.71333 -2.45 2.57 0.166667 0.14 0.333333 0.28 0.5 0.42 0.74 0.62 4.36 3 5.74 3.78 2.39 1.36 4.66 2.21 7.53 2.86 1.34 0.29 1.89 0.33 4.69 0.33 2.74 0 3.39 -0.04 4.82 -0.33 3.45 -0.71 6.63 -2.05 10.76 -4.57 1.27 -0.78 2.54 -1.54 2.81 -1.72 0.46 -0.27 0.43 -0.22 -0.42 0.85 -1.4 1.73 -4.99 5.24 -6.2 6.04 -4.54 3.01 -9.2 4.25 -14.8 3.97 z",
+      16: "M 126.13 100.86 c -3.26 -0.2 -6.42 -1.08 -9.29 -2.58 -1.33 -0.68 -3 -1.73 -2.57 -1.59 4.92 1.57 7.86 2.08 11.15 1.9 5 -0.26 9.3 -1.82 13.23 -4.8 1.85 -1.38 5.87 -4.99 5.87 -5.24 0 -0.14 -4.4 -3.32 -5.91 -4.25 -3.58 -2.21 -6.65 -3.06 -10.46 -2.91 -7.25 0.27 -13.07 3.09 -28.2 13.67 -1.47 1.02 -2.68 1.86 -2.71 1.86 -0.32 0 4.82 -5.12 8.35 -8.37 6.55 -5.99 12.65 -9.48 18.87 -10.77 1.59 -0.33 2.16 -0.39 4.63 -0.39 2.13 -0.01 3.14 0.04 4.18 0.25 3.22 0.61 6.76 2.16 10.17 4.46 2.18 1.47 8.35 6 8.41 6.17 0.07 0.2 -7.5 6.2 -10.07 7.96 -3.27 2.25 -6.23 3.53 -9.74 4.21 -1.17 0.23 -4.18 0.53 -4.83 0.49 -0.2 -0.01 -0.68 -0.04 -1.08 -0.07 z",
+      17: "M 68.87 88.4 c -9.97 -0.48 -16.75 -3.13 -23.47 -9.17 -3.07 -2.74 -6.09 -6.66 -7.88 -10.23 -0.98 -1.96 -2.15 -5.09 -2.68 -7.25 -0.59 -2.34 -1.51 -7.8 -3.33 -19.7 -0.68 -4.44 -1.27 -8.22 -1.31 -8.41 -0.06 -0.32 -0.04 -0.33 0.55 -0.25 0.35 0.04 3.35 0.43 6.68 0.88 11.05 1.44 25.34 3.76 25.73 4.18 0.04 0.06 -0.69 0.06 -1.64 0 -0.95 -0.06 -4.98 -0.19 -8.94 -0.3 -3.97 -0.12 -9.03 -0.27 -11.25 -0.36 -6.46 -0.22 -6.35 -0.22 -6.39 0.03 -0.03 0.13 0.26 1.85 0.62 3.81 2.06 11.09 3.01 16.02 3.39 17.58 1.64 6.91 4.51 12.1 9.39 17.05 2.86 2.9 5.24 4.62 8.71 6.32 3.43 1.7 6.4 2.57 11.83 3.46 2.73 0.45 12.69 1.9 15.07 2.19 0.313333 0.0333333 0.626667 0.0666667 0.94 0.1 -0.336667 0.0333333 -0.673333 0.0666667 -1.01 0.1 -1.37 0.13 -12.14 0.12 -15 -0.03 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z",
+      18: "M 89.19 78.89 c 0.17 -10.23 0.39 -13.69 1.11 -16.93 0.78 -3.58 2.63 -7.89 4.7 -10.98 4.88 -7.25 12 -12.36 20.7 -14.87 2.28 -0.65 4.33 -1.02 11.15 -2 3.1 -0.45 8.48 -1.23 11.96 -1.73 3.49 -0.52 6.36 -0.91 6.39 -0.88 0.06 0.06 -1.14 9.09 -1.7 12.71 -0.98 6.46 -2.54 15.04 -2.88 15.85 -0.07 0.19 -0.09 -0.4 -0.04 -1.43 0.09 -2.09 0.45 -13.99 0.58 -19.17 0.0333333 -1.24667 0.0666667 -2.49333 0.1 -3.74 -0.163333 0.03 -0.326667 0.06 -0.49 0.09 -1.43 0.23 -17.37 3.22 -19.89 3.72 -4.47 0.89 -6.82 1.66 -10.05 3.29 -7.69 3.87 -13.76 10.43 -16.75 18.07 -1.2 3.06 -1.93 6.13 -2.7 11.29 -1.23 8.31 -1.9 12.33 -2.12 12.55 -0.1 0.1 -0.12 -1.9 -0.06 -5.84 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z",
+      19: "M 80.68 79.77 c -1.95 -1.77 -5.21 -5.08 -6.92 -7.01 -5.87 -6.62 -8.47 -13.49 -8.47 -22.36 0 -7.31 1.98 -13.77 6.12 -19.93 1.98 -2.93 15.68 -21.4 15.94 -21.49 0.35 -0.1 10.69 13.21 14.58 18.78 2.11 3.03 5.09 7.76 5.09 8.09 0 0.04 -0.58 -0.61 -1.3 -1.43 -1.63 -1.92 -3.94 -4.43 -6.87 -7.46 -2.38 -2.48 -7.37 -7.79 -9.71 -10.34 -0.74 -0.82 -1.4 -1.49 -1.46 -1.49 -0.07 0 -1.18 1.54 -2.47 3.42 -1.3 1.89 -3.2 4.63 -4.24 6.1 -5.7 8.03 -7.05 10.14 -8.45 13.05 -3.01 6.27 -4 13.7 -2.73 20.55 0.62 3.29 1.5 5.86 3.1 9.01 1.66 3.27 2.52 4.59 7.34 11.03 2.39 3.19 2.28 3.03 2.21 3.03 -0.03 0 -0.84 -0.71 -1.77 -1.57 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z",
+      20: "M 65.26 76.43 c -7.59 -0.97 -14.28 -5.86 -17.58 -12.84 -1.5 -3.17 -2.02 -5.42 -2.9 -12.4 -0.27 -2.25 -0.53 -4.34 -0.58 -4.63 -0.06 -0.43 -0.03 -0.55 0.14 -0.55 0.42 0 7.37 1.02 8.94 1.31 3.49 0.65 6.46 1.57 8.57 2.67 1.41 0.74 1.47 0.72 -1.5 0.23 -1.15 -0.19 -2.42 -0.23 -6.39 -0.22 -2.73 0 -4.99 0.04 -5.03 0.1 -0.29 0.27 0.87 6.29 1.69 8.78 2.24 6.89 7.17 12 14.28 14.83 1.64 0.65 5.55 1.69 7.86 2.08 0.79 0.14 1.5 0.3 1.56 0.36 0.38 0.35 -6.79 0.56 -9.06 0.27 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z",
+      21: "M 84.94 67.37 c -1.96 -1.64 -3.23 -3.04 -4.49 -4.92 -1.67 -2.52 -2.6 -4.76 -3.3 -8.09 -0.48 -2.15 -0.48 -6.32 -0.01 -8.45 0.89 -4.13 2.6 -7.62 5.78 -11.8 2.11 -2.77 5.29 -6.68 5.39 -6.61 0.17 0.1 3.5 4.62 4.73 6.39 1.1 1.57 2.63 4.13 3.38 5.63 0.62 1.24 1.85 4.18 1.76 4.27 -0.03 0.03 -0.66 -0.74 -1.41 -1.7 -0.75 -0.97 -2.06 -2.5 -2.94 -3.4 -2.05 -2.13 -5.06 -4.93 -5.29 -4.93 -0.1 0.01 -0.5 0.48 -0.89 1.05 -4.02 5.91 -4.83 7.34 -5.78 10.28 -2.34 7.13 -0.85 15.23 4.14 22.6 0.32 0.46 0.55 0.87 0.52 0.89 -0.03 0.03 -0.74 -0.52 -1.57 -1.21 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z",
+      22: "M 127.28 64.37 c 0.35 -1.4 0.65 -3.25 0.81 -4.82 0.17 -1.88 0.14 -9.4 -0.04 -9.58 -0.13 -0.13 -4.54 0.45 -6.61 0.87 -2.81 0.59 -4.31 1.08 -6.75 2.25 -3.19 1.51 -5.73 3.36 -8.15 5.91 -0.85 0.88 -1.54 1.57 -1.54 1.53 0 -0.04 0.2 -0.63 0.45 -1.3 1.01 -2.8 3.01 -5.61 5.52 -7.73 3.4 -2.87 7.25 -4.53 12.68 -5.41 3.04 -0.5 9.04 -1.3 9.12 -1.21 0.09 0.09 -0.38 4.18 -0.78 6.97 -0.74 5.06 -2.06 8.97 -4.01 11.91 -0.36 0.55 -0.69 1 -0.74 1 -0.03 0 -0.01 -0.17 0.04 -0.39 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 z"
+    };
+
+    // Originals (unmodified from favicon.svg) — used only for the visual fidelity overlay.
+    const ORIGINALS = {
+      13: "M124.76 112.27 c-0.27 -0.03 -1.13 -0.13 -1.88 -0.20 -4.38 -0.48 -9.27 -2.08 -13.20 -4.30 -2.71 -1.54 -6.79 -4.50 -7.79 -5.65 -0.33 -0.39 -0.29 -0.36 1.30 0.65 5.81 3.72 10.63 5.67 16.15 6.50 2.15 0.33 7.64 0.38 9.74 0.09 6.19 -0.87 11.67 -3.12 16.56 -6.79 1.62 -1.23 2.70 -2.12 11.44 -9.46 2.18 -1.83 4.49 -3.75 5.13 -4.25 0.65 -0.52 1.18 -1.02 1.18 -1.11 0.01 -0.10 -0.59 -0.58 -1.31 -1.08 -1.38 -0.92 -6 -4.13 -10.57 -7.33 -7.59 -5.31 -10.11 -6.74 -14.42 -8.16 -3.75 -1.23 -7.38 -1.72 -11.87 -1.60 -4.62 0.12 -7.40 0.68 -11.50 2.29 -3.33 1.31 -5.99 2.94 -11.24 6.88 -3.91 2.96 -8.18 6.10 -9.53 7.04 -1.62 1.13 7.67 -7.67 11.73 -11.11 3.75 -3.17 7.56 -5.38 11.96 -6.89 7.04 -2.44 16.08 -2.42 23.45 0.04 3.35 1.11 6.40 2.68 10.20 5.21 3.56 2.38 20.42 14.18 20.55 14.38 0.04 0.07 -3.12 2.71 -7.01 5.87 -3.89 3.16 -8.03 6.50 -9.20 7.46 -2.77 2.24 -6.36 4.95 -7.92 5.96 -1.66 1.08 -4.64 2.60 -6.52 3.32 -3.91 1.50 -7.50 2.18 -12.04 2.26 -1.59 0.04 -3.12 0.03 -3.39 0z",
+      14: "M45.87 112.05 c-4.89 -0.46 -9.69 -1.95 -13.92 -4.28 -2.81 -1.56 -9.14 -5.96 -19.05 -13.23 -2.13 -1.57 -4.25 -3.13 -4.70 -3.45 -0.46 -0.33 -0.81 -0.65 -0.78 -0.74 0.01 -0.07 2.67 -2.12 5.87 -4.54 11.37 -8.57 16.37 -12.07 19.93 -13.96 1.10 -0.59 2.02 -1.04 2.06 -1.01 0.03 0.04 -0.25 0.29 -0.63 0.56 -2.41 1.73 -5.34 4.25 -9.84 8.50 -2.96 2.78 -8.57 7.95 -10.11 9.30 -0.46 0.40 -0.84 0.79 -0.84 0.87 0 0.09 0.43 0.43 0.97 0.79 0.53 0.36 4.11 2.78 7.95 5.39 8.81 5.97 10.30 6.94 12.71 8.15 2.29 1.17 4.18 1.89 6.46 2.50 8.48 2.21 17.41 1.37 24.58 -2.32 2 -1.04 3.82 -2.22 8.05 -5.25 4.70 -3.38 10.60 -7.56 11.18 -7.92 1.21 -0.78 -11.29 11.18 -13.80 13.20 -5.42 4.36 -10.75 6.56 -17.86 7.38 -1.92 0.23 -6.14 0.26 -8.22 0.06z",
+      15: "M47.96 100.95 c-4.31 -0.25 -8.52 -1.75 -12.74 -4.56 -1.77 -1.18 -7.36 -5.34 -8.47 -6.29 l-0.55 -0.48 1.86 -1.37 c4.53 -3.36 8.96 -6.10 12.22 -7.60 1.11 -0.49 2.03 -0.88 2.06 -0.85 0.04 0.03 -0.40 0.45 -0.98 0.91 -1.80 1.46 -3.85 3.39 -6.39 6.04 l-2.45 2.57 0.50 0.42 c0.74 0.62 4.36 3 5.74 3.78 2.39 1.36 4.66 2.21 7.53 2.86 1.34 0.29 1.89 0.33 4.69 0.33 2.74 0 3.39 -0.04 4.82 -0.33 3.45 -0.71 6.63 -2.05 10.76 -4.57 1.27 -0.78 2.54 -1.54 2.81 -1.72 0.46 -0.27 0.43 -0.22 -0.42 0.85 -1.40 1.73 -4.99 5.24 -6.20 6.04 -4.54 3.01 -9.20 4.25 -14.80 3.97z",
+      16: "M126.13 100.86 c-3.26 -0.20 -6.42 -1.08 -9.29 -2.58 -1.33 -0.68 -3 -1.73 -2.57 -1.59 4.92 1.57 7.86 2.08 11.15 1.90 5 -0.26 9.30 -1.82 13.23 -4.80 1.85 -1.38 5.87 -4.99 5.87 -5.24 0 -0.14 -4.40 -3.32 -5.91 -4.25 -3.58 -2.21 -6.65 -3.06 -10.46 -2.91 -7.25 0.27 -13.07 3.09 -28.20 13.67 -1.47 1.02 -2.68 1.86 -2.71 1.86 -0.32 0 4.82 -5.12 8.35 -8.37 6.55 -5.99 12.65 -9.48 18.87 -10.77 1.59 -0.33 2.16 -0.39 4.63 -0.39 2.13 -0.01 3.14 0.04 4.18 0.25 3.22 0.61 6.76 2.16 10.17 4.46 2.18 1.47 8.35 6 8.41 6.17 0.07 0.20 -7.50 6.20 -10.07 7.96 -3.27 2.25 -6.23 3.53 -9.74 4.21 -1.17 0.23 -4.18 0.53 -4.83 0.49 -0.20 -0.01 -0.68 -0.04 -1.08 -0.07z",
+      17: "M68.87 88.40 c-9.97 -0.48 -16.75 -3.13 -23.47 -9.17 -3.07 -2.74 -6.09 -6.66 -7.88 -10.23 -0.98 -1.96 -2.15 -5.09 -2.68 -7.25 -0.59 -2.34 -1.51 -7.80 -3.33 -19.70 -0.68 -4.44 -1.27 -8.22 -1.31 -8.41 -0.06 -0.32 -0.04 -0.33 0.55 -0.25 0.35 0.04 3.35 0.43 6.68 0.88 11.05 1.44 25.34 3.76 25.73 4.18 0.04 0.06 -0.69 0.06 -1.64 0 -0.95 -0.06 -4.98 -0.19 -8.94 -0.30 -3.97 -0.12 -9.03 -0.27 -11.25 -0.36 -6.46 -0.22 -6.35 -0.22 -6.39 0.03 -0.03 0.13 0.26 1.85 0.62 3.81 2.06 11.09 3.01 16.02 3.39 17.58 1.64 6.91 4.51 12.10 9.39 17.05 2.86 2.90 5.24 4.62 8.71 6.32 3.43 1.70 6.40 2.57 11.83 3.46 2.73 0.45 12.69 1.90 15.07 2.19 l0.94 0.10 -1.01 0.10 c-1.37 0.13 -12.14 0.12 -15 -0.03z",
+      18: "M89.19 78.89 c0.17 -10.23 0.39 -13.69 1.11 -16.93 0.78 -3.58 2.63 -7.89 4.70 -10.98 4.88 -7.25 12 -12.36 20.70 -14.87 2.28 -0.65 4.33 -1.02 11.15 -2 3.10 -0.45 8.48 -1.23 11.96 -1.73 3.49 -0.52 6.36 -0.91 6.39 -0.88 0.06 0.06 -1.14 9.09 -1.70 12.71 -0.98 6.46 -2.54 15.04 -2.88 15.85 -0.07 0.19 -0.09 -0.40 -0.04 -1.43 0.09 -2.09 0.45 -13.99 0.58 -19.17 l0.10 -3.74 -0.49 0.09 c-1.43 0.23 -17.37 3.22 -19.89 3.72 -4.47 0.89 -6.82 1.66 -10.05 3.29 -7.69 3.87 -13.76 10.43 -16.75 18.07 -1.20 3.06 -1.93 6.13 -2.70 11.29 -1.23 8.31 -1.90 12.33 -2.12 12.55 -0.10 0.10 -0.12 -1.90 -0.06 -5.84z",
+      19: "M80.68 79.77 c-1.95 -1.77 -5.21 -5.08 -6.92 -7.01 -5.87 -6.62 -8.47 -13.49 -8.47 -22.36 0 -7.31 1.98 -13.77 6.12 -19.93 1.98 -2.93 15.68 -21.40 15.94 -21.49 0.35 -0.10 10.69 13.21 14.58 18.78 2.11 3.03 5.09 7.76 5.09 8.09 0 0.04 -0.58 -0.61 -1.30 -1.43 -1.63 -1.92 -3.94 -4.43 -6.87 -7.46 -2.38 -2.48 -7.37 -7.79 -9.71 -10.34 -0.74 -0.82 -1.40 -1.49 -1.46 -1.49 -0.07 0 -1.18 1.54 -2.47 3.42 -1.30 1.89 -3.20 4.63 -4.24 6.10 -5.70 8.03 -7.05 10.14 -8.45 13.05 -3.01 6.27 -4 13.70 -2.73 20.55 0.62 3.29 1.50 5.86 3.10 9.01 1.66 3.27 2.52 4.59 7.34 11.03 2.39 3.19 2.28 3.03 2.21 3.03 -0.03 0 -0.84 -0.71 -1.77 -1.57z",
+      20: "M65.26 76.43 c-7.59 -0.97 -14.28 -5.86 -17.58 -12.84 -1.50 -3.17 -2.02 -5.42 -2.90 -12.40 -0.27 -2.25 -0.53 -4.34 -0.58 -4.63 -0.06 -0.43 -0.03 -0.55 0.14 -0.55 0.42 0 7.37 1.02 8.94 1.31 3.49 0.65 6.46 1.57 8.57 2.67 1.41 0.74 1.47 0.72 -1.50 0.23 -1.15 -0.19 -2.42 -0.23 -6.39 -0.22 -2.73 0 -4.99 0.04 -5.03 0.10 -0.29 0.27 0.87 6.29 1.69 8.78 2.24 6.89 7.17 12 14.28 14.83 1.64 0.65 5.55 1.69 7.86 2.08 0.79 0.14 1.50 0.30 1.56 0.36 0.38 0.35 -6.79 0.56 -9.06 0.27z",
+      21: "M84.94 67.37 c-1.96 -1.64 -3.23 -3.04 -4.49 -4.92 -1.67 -2.52 -2.60 -4.76 -3.30 -8.09 -0.48 -2.15 -0.48 -6.32 -0.01 -8.45 0.89 -4.13 2.60 -7.62 5.78 -11.80 2.11 -2.77 5.29 -6.68 5.39 -6.61 0.17 0.10 3.50 4.62 4.73 6.39 1.10 1.57 2.63 4.13 3.38 5.63 0.62 1.24 1.85 4.18 1.76 4.27 -0.03 0.03 -0.66 -0.74 -1.41 -1.70 -0.75 -0.97 -2.06 -2.50 -2.94 -3.40 -2.05 -2.13 -5.06 -4.93 -5.29 -4.93 -0.10 0.01 -0.50 0.48 -0.89 1.05 -4.02 5.91 -4.83 7.34 -5.78 10.28 -2.34 7.13 -0.85 15.23 4.14 22.60 0.32 0.46 0.55 0.87 0.52 0.89 -0.03 0.03 -0.74 -0.52 -1.57 -1.21z",
+      22: "M127.28 64.37 c0.35 -1.40 0.65 -3.25 0.81 -4.82 0.17 -1.88 0.14 -9.40 -0.04 -9.58 -0.13 -0.13 -4.54 0.45 -6.61 0.87 -2.81 0.59 -4.31 1.08 -6.75 2.25 -3.19 1.51 -5.73 3.36 -8.15 5.91 -0.85 0.88 -1.54 1.57 -1.54 1.53 0 -0.04 0.20 -0.63 0.45 -1.30 1.01 -2.80 3.01 -5.61 5.52 -7.73 3.40 -2.87 7.25 -4.53 12.68 -5.41 3.04 -0.50 9.04 -1.30 9.12 -1.21 0.09 0.09 -0.38 4.18 -0.78 6.97 -0.74 5.06 -2.06 8.97 -4.01 11.91 -0.36 0.55 -0.69 1 -0.74 1 -0.03 0 -0.01 -0.17 0.04 -0.39z"
+    };
+
+    // Petal pairs (Right -> Left). Each pair = [majorId, minorId].
+    // Pair 1 is the rightmost — the only complete petal at rest, anchor for bloom.
+    const PAIRS = [
+      { idx: 1, major: 13, minor: 16 },
+      { idx: 2, major: 18, minor: 22 },
+      { idx: 3, major: 19, minor: 21 },
+      { idx: 4, major: 17, minor: 20 },
+      { idx: 5, major: 14, minor: 15 }
+    ];
+
+    // ===== Pivot + bloom-angle math ===========================================
+    // Pivot = centroid of the start points (first M coordinate) of all five major
+    // paths. This is the visual base of the petal fan, NOT the SVG bbox center.
+    const MAJOR_STARTS = {
+      13: { x: 124.76, y: 112.27 },
+      18: { x: 89.19,  y: 78.89  },
+      19: { x: 80.68,  y: 79.77  },
+      17: { x: 68.87,  y: 88.40  },
+      14: { x: 45.87,  y: 112.05 }
+    };
+    const cx = (MAJOR_STARTS[13].x + MAJOR_STARTS[18].x + MAJOR_STARTS[19].x + MAJOR_STARTS[17].x + MAJOR_STARTS[14].x) / 5;
+    const cy = (MAJOR_STARTS[13].y + MAJOR_STARTS[18].y + MAJOR_STARTS[19].y + MAJOR_STARTS[17].y + MAJOR_STARTS[14].y) / 5;
+
+    function angleOf(pt) {
+      // SVG y is flipped vs. math; use atan2 directly — angles increase CW on screen.
+      return Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
+    }
+
+    const pair1Angle = angleOf(MAJOR_STARTS[13]);
+
+    // Bloom-rotation derivation:
+    //   At end-of-bloom, each pair's `d` has morphed to CANONICAL_MAJOR_D, whose
+    //   M coordinate is path13's start (124.76, 112.27) — i.e., at pair1's angle.
+    //   To land pair N's start at its target angle (pair1Angle - (N-1)*72°), the
+    //   group rotation must be:  R = (target - pair1Angle) = -(N-1)*72°.
+    //   We then normalize R to its shortest-arc equivalent in [-180, 180] so each
+    //   pair takes the short way around (avoids a 288° sweep for pair 5).
+    //
+    //   The pair's `currentAngle` is informational only — at t=0 the path's d is
+    //   REAUTHORED (positioned at the pair's at-rest M coord) and the group
+    //   rotation is 0, so the petal renders at its current location. As both
+    //   the d and the rotation animate, the petal slides toward the target.
+    const blooms = PAIRS.map(p => {
+      const start = MAJOR_STARTS[p.major];
+      const current = angleOf(start);
+      const target = pair1Angle - (p.idx - 1) * 72;
+      let delta = target - pair1Angle;  // canonical anchor angle == pair1Angle
+      // Shortest-arc normalization to [-180, 180]
+      while (delta > 180) delta -= 360;
+      while (delta < -180) delta += 360;
+      return { ...p, currentAngle: current, targetAngle: target, deltaDeg: delta };
+    });
+
+    // ===== Build the SVG ======================================================
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const flower = document.getElementById("flower");
+    const svg = document.getElementById("lotusSvg");
+
+    // Continuous spin: an <animateTransform> on the #flower group, rotating
+    // 0->360 around the pivot, 4s per revolution, infinite, BEGINs at 1.2s
+    // (the moment bloom finishes).
+    const spin = document.createElementNS(SVG_NS, "animateTransform");
+    spin.setAttribute("attributeName", "transform");
+    spin.setAttribute("type", "rotate");
+    spin.setAttribute("from", `0 ${cx} ${cy}`);
+    spin.setAttribute("to", `360 ${cx} ${cy}`);
+    spin.setAttribute("dur", "4s");
+    spin.setAttribute("begin", "1.2s");
+    spin.setAttribute("repeatCount", "indefinite");
+    flower.appendChild(spin);
+
+    // For each pair, create a <g class="pair"> that holds:
+    //   - the major path with an <animate> from reauthored -> canonical
+    //   - the minor path with an <animate> from reauthored -> canonical
+    //   - an <animateTransform> rotate that runs the bloom delta over 1.2s ease-out
+    // The rotation is applied to the <g> so the entire pair (major + minor) moves
+    // together and the petal interpolation happens in pair-local coords.
+    //
+    // ease-out cubic via `keySplines="0 0 0.2 1"` and `calcMode="spline"`.
+    const CANONICAL_MAJOR_D = REAUTHORED[13];
+    const CANONICAL_MINOR_D = REAUTHORED[16];
+
+    for (const b of blooms) {
+      const g = document.createElementNS(SVG_NS, "g");
+      g.setAttribute("class", "pair pair-" + b.idx);
+
+      // Major path
+      const majorPath = document.createElementNS(SVG_NS, "path");
+      majorPath.setAttribute("d", REAUTHORED[b.major]);
+      majorPath.setAttribute("class", "major reauthored");
+      g.appendChild(majorPath);
+
+      if (b.major !== 13) {
+        const aD = document.createElementNS(SVG_NS, "animate");
+        aD.setAttribute("attributeName", "d");
+        aD.setAttribute("from", REAUTHORED[b.major]);
+        aD.setAttribute("to", CANONICAL_MAJOR_D);
+        aD.setAttribute("dur", "1.2s");
+        aD.setAttribute("begin", "0s");
+        aD.setAttribute("fill", "freeze");
+        aD.setAttribute("calcMode", "spline");
+        aD.setAttribute("keyTimes", "0;1");
+        aD.setAttribute("keySplines", "0 0 0.2 1");
+        majorPath.appendChild(aD);
+      }
+
+      // Minor path
+      const minorPath = document.createElementNS(SVG_NS, "path");
+      minorPath.setAttribute("d", REAUTHORED[b.minor]);
+      minorPath.setAttribute("class", "minor reauthored");
+      g.appendChild(minorPath);
+
+      if (b.minor !== 16) {
+        const aDm = document.createElementNS(SVG_NS, "animate");
+        aDm.setAttribute("attributeName", "d");
+        aDm.setAttribute("from", REAUTHORED[b.minor]);
+        aDm.setAttribute("to", CANONICAL_MINOR_D);
+        aDm.setAttribute("dur", "1.2s");
+        aDm.setAttribute("begin", "0s");
+        aDm.setAttribute("fill", "freeze");
+        aDm.setAttribute("calcMode", "spline");
+        aDm.setAttribute("keyTimes", "0;1");
+        aDm.setAttribute("keySplines", "0 0 0.2 1");
+        minorPath.appendChild(aDm);
+      }
+
+      // Bloom rotation transform on the pair group.
+      // Rotate around (cx, cy) so each petal swings around the lotus base.
+      // For pair1 the delta is 0 — but emit a no-op for symmetry.
+      const at = document.createElementNS(SVG_NS, "animateTransform");
+      at.setAttribute("attributeName", "transform");
+      at.setAttribute("type", "rotate");
+      at.setAttribute("from", `0 ${cx} ${cy}`);
+      at.setAttribute("to", `${b.deltaDeg} ${cx} ${cy}`);
+      at.setAttribute("dur", "1.2s");
+      at.setAttribute("begin", "0s");
+      at.setAttribute("fill", "freeze");
+      at.setAttribute("calcMode", "spline");
+      at.setAttribute("keyTimes", "0;1");
+      at.setAttribute("keySplines", "0 0 0.2 1");
+      g.appendChild(at);
+
+      // Reduce-motion: when active, force the bloomed pose by adding a static
+      // transform attribute. The animate elements are display:none'd via CSS so
+      // they won't override.
+      g.setAttribute("data-bloom-end", `rotate(${b.deltaDeg} ${cx} ${cy})`);
+
+      // Overlay: a second copy of the original (un-reauthored) path, in green,
+      // toggled visible by .overlay-on on body. Sits as a sibling inside the pair
+      // so it transforms together when the user toggles overlay BEFORE bloom.
+      const origMajor = document.createElementNS(SVG_NS, "path");
+      origMajor.setAttribute("d", ORIGINALS[b.major]);
+      origMajor.setAttribute("class", "overlay original-major");
+      origMajor.setAttribute("fill", "#22c55e");
+      origMajor.setAttribute("opacity", "0.5");
+      g.appendChild(origMajor);
+
+      const origMinor = document.createElementNS(SVG_NS, "path");
+      origMinor.setAttribute("d", ORIGINALS[b.minor]);
+      origMinor.setAttribute("class", "overlay original-minor");
+      origMinor.setAttribute("fill", "#22c55e");
+      origMinor.setAttribute("opacity", "0.5");
+      g.appendChild(origMinor);
+
+      // Re-tint reauthored paths red when overlay is on (CSS does this via
+      // attribute selector; simpler to set a class).
+      flower.appendChild(g);
+    }
+
+    // When overlay is on, recolor reauthored paths red @ 0.5 so they overlap
+    // the green originals visibly. We do this with CSS using attribute selectors.
+    const overlayStyle = document.createElement("style");
+    overlayStyle.textContent = `
+      body.overlay-on .splash svg .reauthored {
+        fill: #ef4444 !important;
+        opacity: 0.5;
+      }
+    `;
+    document.head.appendChild(overlayStyle);
+
+    // ===== Reduce-motion: force bloomed pose ==================================
+    // When data-reduce-motion=on, we set the static transform on each pair group
+    // so it appears in its bloomed position. (The <animateTransform> is hidden
+    // by CSS.) We also need to force the partial paths to their canonical d.
+    const reduceMotionStyleApply = () => {
+      const on = document.documentElement.dataset.reduceMotion === "on";
+      flower.querySelectorAll(".pair").forEach(g => {
+        if (on) {
+          g.setAttribute("transform", g.getAttribute("data-bloom-end"));
+        } else {
+          g.removeAttribute("transform");
+        }
+      });
+      // Force complete shape on partial paths
+      flower.querySelectorAll(".major.reauthored").forEach(p => {
+        if (on) p.setAttribute("d", CANONICAL_MAJOR_D);
+        // When turning OFF, restore original reauthored d so the bloom can replay.
+        // We need to know which pair this path belongs to. The simplest approach:
+        // restore from its parent pair index.
+      });
+      flower.querySelectorAll(".minor.reauthored").forEach(p => {
+        if (on) p.setAttribute("d", CANONICAL_MINOR_D);
+      });
+      if (!on) {
+        // Restore reauthored path-data for replay
+        for (const b of blooms) {
+          const pairG = flower.querySelector(`.pair-${b.idx}`);
+          if (!pairG) continue;
+          pairG.querySelector(".major.reauthored").setAttribute("d", REAUTHORED[b.major]);
+          pairG.querySelector(".minor.reauthored").setAttribute("d", REAUTHORED[b.minor]);
+        }
+      }
+    };
+
+    // ===== Wiring ==============================================================
+    const splash = document.getElementById("splash");
+    const stopBtn = document.getElementById("stopBtn");
+    const reduceMotionToggle = document.getElementById("reduceMotionToggle");
+    const overlayToggle = document.getElementById("overlayToggle");
+    const out = document.getElementById("consoleOut");
+
+    function log(...args) {
+      const line = args.map(a => typeof a === "string" ? a : JSON.stringify(a, null, 2)).join(" ");
+      out.textContent += line + "\n";
+      console.log(...args);
+    }
+
+    stopBtn.addEventListener("click", () => {
+      splash.classList.toggle("fading");
+      stopBtn.textContent = splash.classList.contains("fading")
+        ? "Restore (un-fade)"
+        : "Stop loading (fade out)";
+    });
+
+    reduceMotionToggle.addEventListener("change", () => {
+      if (reduceMotionToggle.checked) {
+        document.documentElement.dataset.reduceMotion = "on";
+      } else {
+        delete document.documentElement.dataset.reduceMotion;
+      }
+      reduceMotionStyleApply();
+      if (!reduceMotionToggle.checked) {
+        // Replay the bloom + spin from t=0 for review
+        try { svg.setCurrentTime(0); } catch (_) {}
+      }
+    });
+
+    overlayToggle.addEventListener("change", () => {
+      document.body.classList.toggle("overlay-on", overlayToggle.checked);
+      // When overlay is on, force pairs back to at-rest pose so reauthored vs
+      // original can be visually compared. When overlay is off, restart the
+      // SVG animations from time 0 so the bloom + spin replay.
+      if (overlayToggle.checked) {
+        flower.querySelectorAll(".pair").forEach(g => g.removeAttribute("transform"));
+        for (const b of blooms) {
+          const pairG = flower.querySelector(`.pair-${b.idx}`);
+          if (!pairG) continue;
+          pairG.querySelector(".major.reauthored").setAttribute("d", REAUTHORED[b.major]);
+          pairG.querySelector(".minor.reauthored").setAttribute("d", REAUTHORED[b.minor]);
+        }
+      } else {
+        try { svg.setCurrentTime(0); } catch (_) {}
+      }
+    });
+
+    // Print computed pivot + per-pair bloom math.
+    log("=== Lotus animation prototype ===");
+    log(`Pivot (centroid of major-path start points): cx=${cx.toFixed(4)}, cy=${cy.toFixed(4)}`);
+    log("");
+    log("Pair angles + bloom rotation (degrees, SVG coordinate space — +Y is down,");
+    log("so +rotation is clockwise on screen):");
+    for (const b of blooms) {
+      log(`  Pair ${b.idx} (major=path${b.major}, minor=path${b.minor}): current=${b.currentAngle.toFixed(4)}°  target=${b.targetAngle.toFixed(4)}°  groupRotation=${b.deltaDeg.toFixed(4)}°  (${b.deltaDeg >= 0 ? "CW" : "CCW"})`);
+    }
+    log("");
+    log("Group rotations use shortest-arc equivalent of -(N-1)*72°. Pair 4 & 5");
+    log("end up rotating CW (+144° / +72°) because that's the short way around;");
+    log("pairs 2 & 3 rotate CCW (-72° / -144°). This produces a symmetric bloom");
+    log("about the pair-1 anchor instead of every pair sweeping CCW the long way.");
+    log("");
+    log("If the spec wanted strictly-CW rotation for every pair, flip pair 4/5");
+    log("group rotations to -216°/-288° respectively (long way around).");
+  </script>
+</body>
+</html>

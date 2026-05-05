@@ -128,7 +128,8 @@ export async function beginRegistration(
     attestationType: 'none',
     excludeCredentials: existing.map((c) => ({ id: c.credentialId })),
     authenticatorSelection: {
-      residentKey: 'preferred',
+      authenticatorAttachment: 'platform',
+      residentKey: 'discouraged',
       userVerification: 'preferred',
     },
     timeout: 60_000,

@@ -67,7 +67,11 @@ jobs:
 
       - name: Install Wrangler
         working-directory: worker
-        run: npm install
+        # --legacy-peer-deps respects our pinned @cloudflare/workers-types
+        # (~4.20240725.0) instead of trying to resolve wrangler's peerOptional
+        # request for ^4.20250408.0. The pin exists because newer types break
+        # tsc against our pinned typescript@~5.5.3.
+        run: npm install --legacy-peer-deps
 
       - name: Deploy Worker
         working-directory: worker

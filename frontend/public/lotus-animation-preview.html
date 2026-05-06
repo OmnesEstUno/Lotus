@@ -91,9 +91,13 @@
        viewBox user coordinates) injected by JS — see #flower below. CSS only
        handles fade-out and the reduce-motion pulse.
 
-       Spin: 2.667s/revolution (= 4 / 1.5 — 1.5x faster than the original 4s)
-       starting at the moment the cascade bloom finishes. The spin's `begin`
-       attribute is set in JS based on BLOOM_TOTAL_S so they stay in sync. */
+       Cascade is OVERLAPPING: the leader pair (rightmost / path13+path16)
+       starts rotating at t=0 and keeps rotating until t=4T. Pair 4 begins
+       morphing at t=0 in parallel; once morphed (t=T), it ALSO starts
+       rotating and continues until t=4T — so pair 5 is still mid-rotation
+       when pair 4 joins. Same pattern for pairs 3 and 2. Pair 1 is the
+       anchor: it morphs in place over [3T, 4T] and never rotates during
+       bloom. Continuous post-bloom spin: 2.667s/revolution. */
     .splash svg {
       width: 256px;
       height: auto;
@@ -229,25 +233,43 @@
 
     const pair1Angle = angleOf(MAJOR_STARTS[13]); // ≈ +22.7618°
 
-    // ===== Bloom-rotation derivation (corrected) ==============================
-    // The morph target for pairs 1-4 is path13's canonical `d` (and path16 for
-    // the minor). At the end of the morph, every pair's geometry has been
-    // interpolated to the canonical petal — which lives at angle pair1Angle
-    // (≈ +22.76°) from the pivot. So the group rotation must take the MORPHED
-    // position (at pair1Angle) to the desired target, not the at-rest position.
+    // ===== Bloom-rotation derivation =========================================
+    // Each pair morphs to a canonical (path13/path16) PRE-ROTATED to land at
+    // that pair's own at-rest angle. After the morph, every pair sits at its
+    // own currentAngle (not at pair1Angle). The group rotation then carries
+    // the pair from currentAngle to targetAngle CW.
     //
-    //   group_rotation = ((targetAngle - pair1Angle) mod 360 + 360) mod 360
+    //   group_rotation = ((targetAngle - currentAngle) mod 360 + 360) mod 360
     //
-    // Pair 5 is the cascade ANCHOR — it does not rotate. It stays at its at-rest
-    // angle (+153.7259°) and the other pairs spread CW from there at 72° steps.
+    // Pair 5 (internal idx 5) is the cascade ANCHOR — its target equals its
+    // currentAngle, so its delta is 0 and it doesn't rotate during bloom.
+    // The other four pairs spread CW from the anchor at 72° steps.
     //
-    // Targets (CW from pair 5):
-    //   Pair 5: +153.7259°  (anchor — equals its currentAngle)
-    //   Pair 4: +225.7259°
-    //   Pair 3: +297.7259°
-    //   Pair 2: +369.7259° (= +9.7259°)
-    //   Pair 1: +81.7259°
-    const PAIR5_ANGLE = angleOf(MAJOR_STARTS[14]); // ≈ +153.7259°
+    // Internal idx mapping (kept from earlier code) is reversed from the
+    // user-facing labelling described in the design spec:
+    //   internal idx 1 = user "Pair 5" = path13 / path16 (rightmost, leader)
+    //   internal idx 2 = user "Pair 4"
+    //   internal idx 3 = user "Pair 3"
+    //   internal idx 4 = user "Pair 2"
+    //   internal idx 5 = user "Pair 1" = path14 / path15 (leftmost, anchor)
+    //
+    // Targets (CW from anchor):
+    //   internal idx 5 (anchor):    +153.7259°
+    //   internal idx 4:             +225.7259°
+    //   internal idx 3:             +297.7259°
+    //   internal idx 2:             +369.7259° (= +9.7259°)
+    //   internal idx 1 (leader):    +441.7259° (= +81.7259°)
+    // Bloom-target geometry. The anchor (idx 5 / user "Pair 1") stays put at
+    // its at-rest M throughout the bloom — no Y motion, no X motion, no
+    // rotation, no scale change. The other four pairs scale outward + rotate
+    // around the pivot to land at canonical_dist from pivot at angles 72°
+    // apart from the anchor's at-rest angle. Tradeoff: the anchor ends up
+    // slightly closer to the pivot than the other four (40.15 vs 46.51), so
+    // the bloomed lotus is angularly symmetric (72°) but not radially
+    // symmetric. If radial symmetry is required, the anchor would need a
+    // brief outward catch-up at end-of-bloom (re-introducing some Y motion).
+    const CANONICAL_DIST = Math.hypot(MAJOR_STARTS[13].x - cx, MAJOR_STARTS[13].y - cy); // ≈ 46.50
+    const PAIR5_ANGLE = angleOf(MAJOR_STARTS[14]); // ≈ +153.7259° — anchor's at-rest angle, unchanged
     const TARGET_BY_IDX = {
       5: PAIR5_ANGLE,
       4: PAIR5_ANGLE + 72,
@@ -260,17 +282,60 @@
       const start = MAJOR_STARTS[p.major];
       const current = angleOf(start);
       const target = TARGET_BY_IDX[p.idx];
-      // Strict-CW delta in [0, 360). For pair 5 this is computed but UNUSED as
-      // a group rotation — pair 5 doesn't rotate. Instead the same value (≈
-      // 130.96°) is used to PRE-ROTATE pair 5's canonical morph target so the
-      // morph fills in at pair 5's at-rest position (no angular jump).
-      const delta = ((target - pair1Angle) % 360 + 360) % 360;
+      // CW delta from currentAngle to target. Anchor (idx 5) gets delta = 0
+      // explicitly: with the geometry-shift we don't want the anchor to rotate
+      // around the pivot during its catch-up phase (any rotation around pivot
+      // would lift M off its at-rest Y temporarily, violating the user's
+      // "no Y motion for pair 1" requirement). Instead the anchor's morphed
+      // shape is pre-rotated to the target angle directly (see MORPHED below).
+      const delta = (p.idx === 5)
+        ? 0
+        : ((target - current) % 360 + 360) % 360;
       return { ...p, currentAngle: current, targetAngle: target, deltaDeg: delta };
     });
 
-    // ===== Pair 5's pre-rotated canonical morph targets =======================
-    // Rigid rotation of every coordinate in path13's d (and path16's d) by
-    // θ = pair5 deltaDeg ≈ +130.9641° around the pivot (cx, cy).
+    // ===== scalePathD: scale a path's coordinates by `s` about (px, py) =======
+    // Used to shrink the canonical-pre-rotated d-string down to a pair's
+    // at-rest size so the morphed shape fits in the same area as the partial,
+    // not extending across the whole lotus.
+    function scalePathD(d, s, px, py) {
+      if (s === 1) return d;
+      const tokens = d.match(/[MmLlCcZz]|-?\d*\.?\d+(?:e[-+]?\d+)?/g);
+      if (!tokens) return d;
+      const scaleAbs = (x, y) => [px + s * (x - px), py + s * (y - py)];
+      const scaleRel = (dx, dy) => [s * dx, s * dy];
+      const out = [];
+      let cmd = null;
+      let i = 0;
+      const num = () => parseFloat(tokens[i++]);
+      while (i < tokens.length) {
+        const tk = tokens[i];
+        if (/^[MmLlCcZz]$/.test(tk)) { cmd = tk; out.push(cmd); i++; continue; }
+        if (cmd === "M" || cmd === "L") {
+          const x = num(), y = num();
+          out.push(...scaleAbs(x, y));
+          if (cmd === "M") cmd = "L";
+        } else if (cmd === "m" || cmd === "l") {
+          const dx = num(), dy = num();
+          out.push(...scaleRel(dx, dy));
+          if (cmd === "m") cmd = "l";
+        } else if (cmd === "C") {
+          out.push(...scaleAbs(num(), num()), ...scaleAbs(num(), num()), ...scaleAbs(num(), num()));
+        } else if (cmd === "c") {
+          out.push(...scaleRel(num(), num()), ...scaleRel(num(), num()), ...scaleRel(num(), num()));
+        } else { i++; }
+      }
+      const fmt = v => typeof v === "string" ? v : Number(v.toFixed(4)).toString();
+      return out.map(fmt).join(" ");
+    }
+
+    // ===== Per-pair morph-in-place shape data =================================
+    // Each pair morphs from its at-rest (REAUTHORED) d to a canonical
+    // (path13's d for major, path16's for minor) rigidly rotated so the
+    // canonical's M-point lands at the pair's own at-rest angle. This way
+    // the morph fills the petal "in place" without sliding angularly across
+    // the lotus mid-interpolation. After the morph, the pair's bloom rotation
+    // (deltaDeg around the pivot) carries it CW to its bloomed target.
     //
     // SVG path command structure (after the "M x y" prefix, the rest is "c"
     // cubics with relative control deltas + an absolute(ish) endpoint pair —
@@ -371,29 +436,88 @@
       return parts.join(" ");
     }
 
-    const PAIR5_PREROTATE_DEG = blooms.find(b => b.idx === 5).deltaDeg; // ≈ 130.9641°
-    const PAIR5_MAJOR_D = rotatePathD(REAUTHORED[13], PAIR5_PREROTATE_DEG, cx, cy);
-    const PAIR5_MINOR_D = rotatePathD(REAUTHORED[16], PAIR5_PREROTATE_DEG, cx, cy);
-
-    // ===== Cascade timing (corrected — pair 1 leads) ==========================
-    // - t = 0   : pair 1 begins rotating CW.        Pair 2 begins morphing.
-    // - t = T   : pair 1's motion completes.        Pair 2 begins rotating CW.   Pair 3 begins morphing.
-    // - t = 2T  : pair 2's motion completes.        Pair 3 begins rotating CW.   Pair 4 begins morphing.
-    // - t = 3T  : pair 3's motion completes.        Pair 4 begins rotating CW.   Pair 5 begins morphing (no rotation).
-    // - t = 4T  : pair 4 + pair 5 morph complete. Bloom done.
+    // Per-pair MORPH-IN-PLACE shape: canonical pre-rotated to the pair's at-rest
+    // angle, then SCALED about the pivot by sPair = atRestDist / CANONICAL_DIST.
+    // The scale brings the canonical's M to exactly the pair's at-rest M, AND
+    // shrinks every other point on the path proportionally — so the morphed
+    // petal occupies the same general area as the partial petal it's replacing
+    // (instead of extending across the whole lotus at full canonical size).
     //
-    // Each pair's rotation duration is exactly T (regardless of delta size — we
-    // intentionally vary angular velocity per pair so motions fit cleanly back
-    // to back without overlap, the simpler choreography the user specified).
-    // Total bloom = 4T. With T = 0.3s, total bloom = 1.2s.
+    // After morph, the partial has faded and the morphed (small canonical at
+    // at-rest M) is fully visible. The rotation phase then scales the petal
+    // up by 1/sPair about the same pivot AND rotates around the pivot — the
+    // combined motion is a clean CW outward spiral from at-rest M to the
+    // bloomed slot at canonical distance and target angle.
+    //
+    // Anchor: sEnd = 1 (no scale-up) and delta = 0 (no rotation), so the
+    // anchor stays at its at-rest M with at-rest size. Asymmetric in distance
+    // (slightly inside the others) but angularly 72°-spaced.
+    const MORPHED = {};
+    for (const b of blooms) {
+      const start = MAJOR_STARTS[b.major];
+      const atRestDist = Math.hypot(start.x - cx, start.y - cy);
+      const sPair = atRestDist / CANONICAL_DIST; // < 1 for non-leader, exactly 1 for leader
+      const preRotateDeg = b.currentAngle - pair1Angle;
+      const preRotMajor = rotatePathD(REAUTHORED[13], preRotateDeg, cx, cy);
+      const preRotMinor = rotatePathD(REAUTHORED[16], preRotateDeg, cx, cy);
+      // Scale about pivot — canonical M moves from CANONICAL_DIST*unit(currentAngle)
+      // to atRestDist*unit(currentAngle) = the pair's at-rest M position. ✓
+      const morphMajor = scalePathD(preRotMajor, sPair, cx, cy);
+      const morphMinor = scalePathD(preRotMinor, sPair, cx, cy);
+      const isAnchor = (b.idx === 5);
+      // sEnd = factor that the rotation-phase scale-about-pivot animation
+      // multiplies into to grow the petal from at-rest size to full canonical.
+      // Anchor stays put → sEnd = 1.
+      const sEnd = isAnchor ? 1 : (1 / sPair);
+      MORPHED[b.idx] = {
+        major: morphMajor,
+        minor: morphMinor,
+        preRotateDeg,
+        atRestM: start,
+        atRestDist,
+        sPair,
+        sEnd,
+        isAnchor,
+      };
+    }
+
+    // ===== Cascade timing (overlapping motion, morph-in-place) ===============
+    // Internal idx 1 = user "Pair 5" (rightmost leader, fully drawn at rest).
+    // Internal idx 5 = user "Pair 1" (leftmost anchor, fills in last).
+    //
+    // Each NON-leader pair morphs IN PLACE (cross-fade + scale-grow at its
+    // own at-rest M — no spatial motion during morph). Once a pair has finished
+    // morphing it begins its rotation+outward-translation phase, joining the
+    // already-rotating earlier pairs. All five rotation phases end at t = 5T,
+    // simultaneously, when every pair has reached its bloomed slot. Global
+    // spin then takes over.
+    //
+    // - t = 0   : idx 1 begins rotating + translating outward.   idx 2 begins morphing in place.
+    // - t = T   : idx 2 finishes morph → joins rotation+outward. idx 3 begins morphing.
+    // - t = 2T  : idx 3 finishes morph → joins rotation+outward. idx 4 begins morphing.
+    // - t = 3T  : idx 4 finishes morph → joins rotation+outward. idx 5 begins morphing.
+    // - t = 4T  : idx 5 finishes morph → joins rotation+outward (small catch-up).
+    // - t = 5T  : All five pairs reach evenly-spaced 72° bloomed slots
+    //             simultaneously. Continuous CW spin takes over.
+    //
+    //   idx 1: rotateBegin=0,  dur=5T
+    //   idx 2: rotateBegin=T,  dur=4T
+    //   idx 3: rotateBegin=2T, dur=3T
+    //   idx 4: rotateBegin=3T, dur=2T
+    //   idx 5: rotateBegin=4T, dur=T   (small catch-up so idx 5 reaches
+    //                                   the geometry-shifted bloomed slot
+    //                                   at distance CANONICAL_DIST.)
+    //
+    // With T = 0.3s, total bloom = 5T = 1.5s.
     const T = 0.3;
-    const BLOOM_TOTAL_S = 4 * T; // 1.2s
-    const ROTATION_BEGIN_BY_IDX = { 1: 0, 2: T, 3: 2 * T, 4: 3 * T };
+    const BLOOM_TOTAL_S = 5 * T; // 1.5s
+    const ROTATION_BEGIN_BY_IDX = { 1: 0, 2: T, 3: 2 * T, 4: 3 * T, 5: 4 * T };
     const MORPH_BEGIN_BY_IDX    = { 2: 0, 3: T, 4: 2 * T, 5: 3 * T };
     function timingFor(idx) {
-      const beginMotionS = ROTATION_BEGIN_BY_IDX[idx]; // undefined for pair 5
-      const beginMorphS  = MORPH_BEGIN_BY_IDX[idx];    // undefined for pair 1
-      return { beginMotionS, durMotionS: T, beginMorphS, durMorphS: T };
+      const beginMotionS = ROTATION_BEGIN_BY_IDX[idx]; // every idx now rotates (idx 5 catches up)
+      const beginMorphS  = MORPH_BEGIN_BY_IDX[idx];    // undefined for idx 1 (leader)
+      const durMotionS   = BLOOM_TOTAL_S - beginMotionS;
+      return { beginMotionS, durMotionS, beginMorphS, durMorphS: T };
     }
 
     // ===== Build the SVG ======================================================
@@ -416,158 +540,231 @@
     spin.setAttribute("repeatCount", "indefinite");
     flower.appendChild(spin);
 
-    // For each pair, create a <g class="pair"> that holds:
-    //   - the major path with an <animate> from reauthored -> canonical
-    //   - the minor path with an <animate> from reauthored -> canonical
-    //   - an <animateTransform> rotate that runs the bloom delta over T seconds
-    //     with an ease-out cubic.
-    // The rotation is applied to the <g> so the entire pair (major + minor)
-    // moves together and the petal interpolation happens in pair-local coords.
+    // For each pair, build a NESTED group structure:
     //
-    // Cascade timing (pair 1 leads — see comments above for derivation):
-    //   - t = 0   : pair 1 rotates;             pair 2 morphs.
-    //   - t = T   : pair 2 rotates;             pair 3 morphs.
-    //   - t = 2T  : pair 3 rotates;             pair 4 morphs.
-    //   - t = 3T  : pair 4 rotates;             pair 5 morphs (no rotation).
+    //   <g class="pair pair-N">              ← outer: rotation about pivot
+    //     <animateTransform type="rotate">    (rotation phase)
+    //     <g transform="translate(cx cy)">   ← static: shift origin to pivot
+    //       <g class="pair-inner">           ← inner: scale-about-origin (= pivot)
+    //         <animateTransform type="scale"> (rotation phase: 1 → sEnd)
+    //         <g transform="translate(-cx -cy)"> ← static: shift origin back
+    //           <path class="partial major"> ← at-rest path-X, fades 1→0 over morph
+    //           <path class="partial minor">
+    //           <g class="morph-anchor"      ← scale-grow about pair's at-rest M
+    //              transform="translate(Mx My)">
+    //             <g class="morph-scale">
+    //               <animateTransform type="scale">  0 → 1 over morph window
+    //               <g transform="translate(-Mx -My)">
+    //                 <path class="morphed major"> ← canonical pre-rotated and
+    //                                                 SCALED about pivot to fit
+    //                                                 at at-rest distance
+    //                 <path class="morphed minor">
+    //               </g>
+    //             </g>
+    //           </g>
+    //         </g>
+    //       </g>
+    //     </g>
+    //   </g>
     //
-    // Pair 5 is special: it does NOT rotate. Its morph target is path13/path16
-    // PRE-ROTATED to its at-rest angle (+153.73°) so it fills in without
-    // sliding angularly.
+    // Effective transform stack on a morphed path's coordinates (innermost first):
+    //   1. translate(-Mx -My)         puts pair's at-rest M at origin
+    //   2. morph scale(s)             scales 0→1 about origin (= at-rest M)
+    //   3. translate(+Mx +My)         origin returns to at-rest M
+    //   4. translate(-cx -cy)         shifts origin to pivot
+    //   5. inner scale(σ)             scales 1 → sEnd about origin (= pivot)
+    //   6. translate(+cx +cy)         shifts origin back
+    //   7. outer rotate(δ, pivot)     rotation around pivot
+    //
+    // The morphed path's d-string already encodes the canonical pre-rotated
+    // and scaled by sPair about pivot, so its M sits at the pair's at-rest M
+    // and its visible bulk fits in the same area the partial occupied.
+    // After morph (steps 1–3 settle at scale 1, full d-string visible), the
+    // rotation phase scales the petal up by 1/sPair (= sEnd) about pivot AND
+    // rotates around pivot — combined motion is a clean CW outward spiral
+    // from at-rest M to the bloomed slot at canonical distance + target angle.
     //
     // ease-out cubic via `keySplines="0.25 0.1 0.25 1"` and `calcMode="spline"`.
-    const CANONICAL_MAJOR_D = REAUTHORED[13];
-    const CANONICAL_MINOR_D = REAUTHORED[16];
     const EASE_OUT_SPLINE = "0.25 0.1 0.25 1";
 
-    function morphTargetMajor(idx) { return idx === 5 ? PAIR5_MAJOR_D : CANONICAL_MAJOR_D; }
-    function morphTargetMinor(idx) { return idx === 5 ? PAIR5_MINOR_D : CANONICAL_MINOR_D; }
+    function setEase(animEl, beginS, durS) {
+      animEl.setAttribute("begin", `${beginS.toFixed(4)}s`);
+      animEl.setAttribute("dur", `${durS.toFixed(4)}s`);
+      animEl.setAttribute("fill", "freeze");
+      animEl.setAttribute("calcMode", "spline");
+      animEl.setAttribute("keyTimes", "0;1");
+      animEl.setAttribute("keySplines", EASE_OUT_SPLINE);
+    }
 
     for (const b of blooms) {
-      const g = document.createElementNS(SVG_NS, "g");
-      g.setAttribute("class", "pair pair-" + b.idx);
+      const m = MORPHED[b.idx];
       const t = timingFor(b.idx);
+      const isLeader = (b.idx === 1);
+      const Mx = m.atRestM.x;
+      const My = m.atRestM.y;
 
-      // Major path
-      const majorPath = document.createElementNS(SVG_NS, "path");
-      majorPath.setAttribute("d", REAUTHORED[b.major]);
-      majorPath.setAttribute("class", "major reauthored");
-      g.appendChild(majorPath);
+      // ── Outer pair group: rotation about pivot (rotation phase) ────────
+      const pairG = document.createElementNS(SVG_NS, "g");
+      pairG.setAttribute("class", "pair pair-" + b.idx);
+      pairG.setAttribute("data-pair-rot-end", `rotate(${b.deltaDeg.toFixed(4)} ${cx} ${cy})`);
+      const pairRotAT = document.createElementNS(SVG_NS, "animateTransform");
+      pairRotAT.setAttribute("attributeName", "transform");
+      pairRotAT.setAttribute("type", "rotate");
+      pairRotAT.setAttribute("from", `0 ${cx} ${cy}`);
+      pairRotAT.setAttribute("to", `${b.deltaDeg.toFixed(4)} ${cx} ${cy}`);
+      setEase(pairRotAT, t.beginMotionS, t.durMotionS);
+      pairG.appendChild(pairRotAT);
 
-      // Pair 1 has no morph (path13 IS canonical); pairs 2-5 morph to canonical
-      // (or pre-rotated canonical, in pair 5's case).
-      if (b.idx !== 1) {
-        const aD = document.createElementNS(SVG_NS, "animate");
-        aD.setAttribute("attributeName", "d");
-        aD.setAttribute("from", REAUTHORED[b.major]);
-        aD.setAttribute("to", morphTargetMajor(b.idx));
-        aD.setAttribute("dur", `${t.durMorphS.toFixed(4)}s`);
-        aD.setAttribute("begin", `${t.beginMorphS.toFixed(4)}s`);
-        aD.setAttribute("fill", "freeze");
-        aD.setAttribute("calcMode", "spline");
-        aD.setAttribute("keyTimes", "0;1");
-        aD.setAttribute("keySplines", EASE_OUT_SPLINE);
-        majorPath.appendChild(aD);
+      // ── Pivot translate (static): shift origin to pivot for inner scale ──
+      const pivotG = document.createElementNS(SVG_NS, "g");
+      pivotG.setAttribute("transform", `translate(${cx} ${cy})`);
+      pairG.appendChild(pivotG);
+
+      // ── Inner group: scale-about-origin (= pivot) over rotation phase ───
+      // Animates 1 → sEnd. Combined with the outer rotation, this carries the
+      // morphed petal's M from at-rest distance up to canonical distance
+      // along an arc (CW outward spiral). Anchor: sEnd = 1 → no scaling.
+      const innerG = document.createElementNS(SVG_NS, "g");
+      innerG.setAttribute("class", "pair-inner");
+      innerG.setAttribute("transform", "scale(1)");
+      innerG.setAttribute("data-inner-scale-end", `scale(${m.sEnd.toFixed(6)})`);
+      const innerScaleAT = document.createElementNS(SVG_NS, "animateTransform");
+      innerScaleAT.setAttribute("attributeName", "transform");
+      innerScaleAT.setAttribute("type", "scale");
+      innerScaleAT.setAttribute("from", "1");
+      innerScaleAT.setAttribute("to", `${m.sEnd.toFixed(6)}`);
+      setEase(innerScaleAT, t.beginMotionS, t.durMotionS);
+      innerG.appendChild(innerScaleAT);
+      pivotG.appendChild(innerG);
+
+      // ── Pivot untranslate (static): origin back to global frame ─────────
+      const unpivotG = document.createElementNS(SVG_NS, "g");
+      unpivotG.setAttribute("transform", `translate(${-cx} ${-cy})`);
+      innerG.appendChild(unpivotG);
+
+      if (isLeader) {
+        // Leader (path13/16): the canonical at-rest paths sit exactly at the
+        // canonical radius already, so the d-string IS the morphed shape.
+        const majorPath = document.createElementNS(SVG_NS, "path");
+        majorPath.setAttribute("d", REAUTHORED[b.major]);
+        majorPath.setAttribute("class", "leader major");
+        unpivotG.appendChild(majorPath);
+        const minorPath = document.createElementNS(SVG_NS, "path");
+        minorPath.setAttribute("d", REAUTHORED[b.minor]);
+        minorPath.setAttribute("class", "leader minor");
+        unpivotG.appendChild(minorPath);
+      } else {
+        // Partial paths fading out (1 → 0 over morph window).
+        for (const which of ["major", "minor"]) {
+          const p = document.createElementNS(SVG_NS, "path");
+          p.setAttribute("d", REAUTHORED[b[which]]);
+          p.setAttribute("class", `partial ${which}`);
+          p.setAttribute("opacity", "1");
+          const fade = document.createElementNS(SVG_NS, "animate");
+          fade.setAttribute("attributeName", "opacity");
+          fade.setAttribute("from", "1");
+          fade.setAttribute("to", "0");
+          setEase(fade, t.beginMorphS, t.durMorphS);
+          p.appendChild(fade);
+          unpivotG.appendChild(p);
+        }
+        // Morph subtree: scale 0 → 1 about at-rest M, opacity 0 → 1. d-string
+        // already encodes a small canonical at at-rest M (canonical-pre-rotated
+        // scaled by sPair about pivot), so the morph "fills in" without sliding.
+        const anchorG = document.createElementNS(SVG_NS, "g");
+        anchorG.setAttribute("class", "morph-anchor");
+        anchorG.setAttribute("transform", `translate(${Mx} ${My})`);
+        const scaleG = document.createElementNS(SVG_NS, "g");
+        scaleG.setAttribute("class", "morph-scale");
+        scaleG.setAttribute("transform", "scale(0)");
+        scaleG.setAttribute("data-scale-end", "scale(1)");
+        const scaleAT = document.createElementNS(SVG_NS, "animateTransform");
+        scaleAT.setAttribute("attributeName", "transform");
+        scaleAT.setAttribute("type", "scale");
+        scaleAT.setAttribute("from", "0");
+        scaleAT.setAttribute("to", "1");
+        setEase(scaleAT, t.beginMorphS, t.durMorphS);
+        scaleG.appendChild(scaleAT);
+        const untranslateG = document.createElementNS(SVG_NS, "g");
+        untranslateG.setAttribute("transform", `translate(${-Mx} ${-My})`);
+        for (const which of ["major", "minor"]) {
+          const p = document.createElementNS(SVG_NS, "path");
+          p.setAttribute("d", m[which]);
+          p.setAttribute("class", `morphed ${which}`);
+          p.setAttribute("opacity", "0");
+          const fadeIn = document.createElementNS(SVG_NS, "animate");
+          fadeIn.setAttribute("attributeName", "opacity");
+          fadeIn.setAttribute("from", "0");
+          fadeIn.setAttribute("to", "1");
+          setEase(fadeIn, t.beginMorphS, t.durMorphS);
+          p.appendChild(fadeIn);
+          untranslateG.appendChild(p);
+        }
+        scaleG.appendChild(untranslateG);
+        anchorG.appendChild(scaleG);
+        unpivotG.appendChild(anchorG);
       }
 
-      // Minor path
-      const minorPath = document.createElementNS(SVG_NS, "path");
-      minorPath.setAttribute("d", REAUTHORED[b.minor]);
-      minorPath.setAttribute("class", "minor reauthored");
-      g.appendChild(minorPath);
-
-      if (b.idx !== 1) {
-        const aDm = document.createElementNS(SVG_NS, "animate");
-        aDm.setAttribute("attributeName", "d");
-        aDm.setAttribute("from", REAUTHORED[b.minor]);
-        aDm.setAttribute("to", morphTargetMinor(b.idx));
-        aDm.setAttribute("dur", `${t.durMorphS.toFixed(4)}s`);
-        aDm.setAttribute("begin", `${t.beginMorphS.toFixed(4)}s`);
-        aDm.setAttribute("fill", "freeze");
-        aDm.setAttribute("calcMode", "spline");
-        aDm.setAttribute("keyTimes", "0;1");
-        aDm.setAttribute("keySplines", EASE_OUT_SPLINE);
-        minorPath.appendChild(aDm);
-      }
-
-      // Bloom rotation transform on the pair group.
-      // Pair 5 doesn't rotate (its morph target is already pre-rotated to the
-      // anchor position). Pairs 1-4 each rotate over T seconds.
-      if (b.idx !== 5) {
-        const at = document.createElementNS(SVG_NS, "animateTransform");
-        at.setAttribute("attributeName", "transform");
-        at.setAttribute("type", "rotate");
-        at.setAttribute("from", `0 ${cx} ${cy}`);
-        at.setAttribute("to", `${b.deltaDeg} ${cx} ${cy}`);
-        at.setAttribute("dur", `${t.durMotionS.toFixed(4)}s`);
-        at.setAttribute("begin", `${t.beginMotionS.toFixed(4)}s`);
-        at.setAttribute("fill", "freeze");
-        at.setAttribute("calcMode", "spline");
-        at.setAttribute("keyTimes", "0;1");
-        at.setAttribute("keySplines", EASE_OUT_SPLINE);
-        g.appendChild(at);
-      }
-
-      // Reduce-motion: when active, force the bloomed pose. Pair 5 stays at the
-      // identity transform (its morph target already encodes the anchor angle);
-      // pairs 1-4 receive a static rotate.
-      const bloomEnd = b.idx === 5
-        ? `rotate(0 ${cx} ${cy})`
-        : `rotate(${b.deltaDeg} ${cx} ${cy})`;
-      g.setAttribute("data-bloom-end", bloomEnd);
-
-      // Overlay: a second copy of the original (un-reauthored) path, in green,
-      // toggled visible by .overlay-on on body. Sits as a sibling inside the pair
-      // so it transforms together when the user toggles overlay BEFORE bloom.
+      // Visual-fidelity overlay: the unmodified-from-favicon originals shown
+      // in green. Lives directly in unpivotG so it inherits all the bloom
+      // transforms, but during overlay-mode all SMIL is hidden by CSS.
       const origMajor = document.createElementNS(SVG_NS, "path");
       origMajor.setAttribute("d", ORIGINALS[b.major]);
       origMajor.setAttribute("class", "overlay original-major");
       origMajor.setAttribute("fill", "#22c55e");
       origMajor.setAttribute("opacity", "0.5");
-      g.appendChild(origMajor);
-
+      unpivotG.appendChild(origMajor);
       const origMinor = document.createElementNS(SVG_NS, "path");
       origMinor.setAttribute("d", ORIGINALS[b.minor]);
       origMinor.setAttribute("class", "overlay original-minor");
       origMinor.setAttribute("fill", "#22c55e");
       origMinor.setAttribute("opacity", "0.5");
-      g.appendChild(origMinor);
+      unpivotG.appendChild(origMinor);
 
-      // Re-tint reauthored paths red when overlay is on (CSS does this via
-      // attribute selector; simpler to set a class).
-      flower.appendChild(g);
+      flower.appendChild(pairG);
     }
 
-    // When overlay is on, recolor reauthored paths red @ 0.5 so they overlap
-    // the green originals visibly. We do this with CSS using attribute selectors.
+    // When overlay is on, recolor partial + leader paths red @ 0.5 so they
+    // overlap the green originals visibly. Hide morphed paths so the
+    // partial-vs-original comparison isn't cluttered.
     const overlayStyle = document.createElement("style");
     overlayStyle.textContent = `
-      body.overlay-on .splash svg .reauthored {
+      body.overlay-on .splash svg .partial,
+      body.overlay-on .splash svg .leader {
         fill: #ef4444 !important;
-        opacity: 0.5;
+        opacity: 0.5 !important;
+      }
+      body.overlay-on .splash svg .morphed {
+        display: none;
       }
     `;
     document.head.appendChild(overlayStyle);
 
     // ===== Reduce-motion: force bloomed pose ==================================
-    // When data-reduce-motion=on, we set the static transform on each pair group
-    // so it appears in its bloomed position. (The <animateTransform> is hidden
-    // by CSS.) We also need to force the partial paths to their canonical d.
+    // When data-reduce-motion=on, we apply each group's static end transform
+    // (animateTransforms are hidden by CSS so they don't tween) and flip the
+    // partial→morphed opacities. Reverse all of that on toggle-off.
     const reduceMotionStyleApply = () => {
       const on = document.documentElement.dataset.reduceMotion === "on";
       for (const b of blooms) {
         const pairG = flower.querySelector(`.pair-${b.idx}`);
         if (!pairG) continue;
+        const innerG = pairG.querySelector(".pair-inner");
+        const scaleG = pairG.querySelector(".morph-scale");
+        const partials = pairG.querySelectorAll(".partial");
+        const morphed = pairG.querySelectorAll(".morphed");
         if (on) {
-          pairG.setAttribute("transform", pairG.getAttribute("data-bloom-end"));
-          // Force the bloomed-shape d on every pair's paths.
-          // Pair 5 uses its pre-rotated canonical; everyone else uses raw canonical.
-          pairG.querySelector(".major.reauthored").setAttribute("d", morphTargetMajor(b.idx));
-          pairG.querySelector(".minor.reauthored").setAttribute("d", morphTargetMinor(b.idx));
+          pairG.setAttribute("transform", pairG.getAttribute("data-pair-rot-end"));
+          if (innerG) innerG.setAttribute("transform", innerG.getAttribute("data-inner-scale-end"));
+          if (scaleG) scaleG.setAttribute("transform", scaleG.getAttribute("data-scale-end"));
+          partials.forEach(p => p.setAttribute("opacity", "0"));
+          morphed.forEach(p => p.setAttribute("opacity", "1"));
         } else {
           pairG.removeAttribute("transform");
-          // Restore reauthored partial d so the bloom can replay.
-          pairG.querySelector(".major.reauthored").setAttribute("d", REAUTHORED[b.major]);
-          pairG.querySelector(".minor.reauthored").setAttribute("d", REAUTHORED[b.minor]);
+          if (innerG) innerG.setAttribute("transform", "scale(1)");
+          if (scaleG) scaleG.setAttribute("transform", "scale(0)");
+          partials.forEach(p => p.setAttribute("opacity", "1"));
+          morphed.forEach(p => p.setAttribute("opacity", "0"));
         }
       }
     };
@@ -611,13 +808,14 @@
       // original can be visually compared. When overlay is off, restart the
       // SVG animations from time 0 so the bloom + spin replay.
       if (overlayToggle.checked) {
+        // Force each pair group/rot-group/scale-group back to identity AND
+        // partial paths back to opacity 1, so the overlay comparison is at
+        // the at-rest pose.
         flower.querySelectorAll(".pair").forEach(g => g.removeAttribute("transform"));
-        for (const b of blooms) {
-          const pairG = flower.querySelector(`.pair-${b.idx}`);
-          if (!pairG) continue;
-          pairG.querySelector(".major.reauthored").setAttribute("d", REAUTHORED[b.major]);
-          pairG.querySelector(".minor.reauthored").setAttribute("d", REAUTHORED[b.minor]);
-        }
+        flower.querySelectorAll(".pair-inner").forEach(g => g.setAttribute("transform", "scale(1)"));
+        flower.querySelectorAll(".morph-scale").forEach(g => g.setAttribute("transform", "scale(0)"));
+        flower.querySelectorAll(".partial").forEach(p => p.setAttribute("opacity", "1"));
+        flower.querySelectorAll(".morphed").forEach(p => p.setAttribute("opacity", "0"));
       } else {
         try { svg.setCurrentTime(0); } catch (_) {}
       }
@@ -626,40 +824,43 @@
     // Print computed pivot + per-pair bloom math.
     log("=== Lotus animation prototype ===");
     log(`Pivot (centroid of major-path start points): cx=${cx.toFixed(4)}, cy=${cy.toFixed(4)}`);
-    log(`pair1Angle = ${pair1Angle.toFixed(4)}°  (path13's M-point angle from pivot)`);
-    log(`PAIR5_ANGLE = ${PAIR5_ANGLE.toFixed(4)}°  (anchor — pair 5 stays here)`);
+    log(`pair1Angle = ${pair1Angle.toFixed(4)}°  (canonical path13's M-point angle from pivot)`);
+    log(`PAIR5_ANGLE = ${PAIR5_ANGLE.toFixed(4)}°  (anchor's bloomed angle — chosen so the bloomed M's Y == anchor's at-rest Y)`);
+    log(`CANONICAL_DIST = ${CANONICAL_DIST.toFixed(4)}  (every bloomed M sits at this distance from pivot)`);
     log("");
     log("Pair angles + bloom rotation (degrees, SVG coordinate space — +Y is down,");
-    log("so +rotation is clockwise on screen). Formula: ((target - pair1Angle) mod 360 + 360) mod 360.");
-    log("Pair 1 LEADS the cascade. Pair 5 is the anchor and does NOT rotate (its delta is used");
-    log("only to PRE-ROTATE pair 5's morph target so the morph fills in at the anchor angle).");
+    log("so +rotation is clockwise on screen). Formula: ((target - currentAngle) mod 360 + 360) mod 360.");
+    log("idx 1 LEADS the cascade (rotates from t=0 to t=4T). idx 5 is the ANCHOR — its target equals");
+    log("its currentAngle, so its delta is 0 and it does not rotate during bloom.");
     for (const b of blooms) {
-      const note = b.idx === 5 ? "  (NOT a group rotation — pair 5 doesn't rotate; used to pre-rotate morph target)" : "";
-      log(`  Pair ${b.idx} (major=path${b.major}, minor=path${b.minor}): current=${b.currentAngle.toFixed(4)}°  target=${b.targetAngle.toFixed(4)}°  cwDelta=${b.deltaDeg.toFixed(4)}°${note}`);
+      const role = b.idx === 1 ? "  [leader]" : b.idx === 5 ? "  [anchor — no rotation]" : "";
+      log(`  idx ${b.idx} (major=path${b.major}, minor=path${b.minor}): current=${b.currentAngle.toFixed(4)}°  target=${b.targetAngle.toFixed(4)}°  cwDelta=${b.deltaDeg.toFixed(4)}°${role}`);
     }
     log("");
-    log("Pair 5 pre-rotated canonical M-points (sanity check: should land near pair 5's at-rest");
-    log("M-points (path14: 45.87, 112.05) and (path15: 47.96, 100.95) — within a few units):");
+    log("Per-pair morph shape sanity check (each pair's morphed major's M should");
+    log("land EXACTLY at the pair's at-rest major M — that's the whole point of the");
+    log("translatePathD step). Bloom translation = where the pair group ends up");
+    log("after its rotation+outward phase, relative to at-rest.");
     function firstMOf(d) {
       const m = d.match(/^\s*M\s*(-?\d*\.?\d+(?:e[-+]?\d+)?)\s+(-?\d*\.?\d+(?:e[-+]?\d+)?)/);
       return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]) } : null;
     }
-    const m5major = firstMOf(PAIR5_MAJOR_D);
-    const m5minor = firstMOf(PAIR5_MINOR_D);
-    log(`  Pre-rotated path13 M = (${m5major.x.toFixed(4)}, ${m5major.y.toFixed(4)})  vs  path14 M = (45.87, 112.05)`);
-    log(`  Pre-rotated path16 M = (${m5minor.x.toFixed(4)}, ${m5minor.y.toFixed(4)})  vs  path15 M = (47.96, 100.95)`);
+    for (const b of blooms) {
+      const morph = MORPHED[b.idx];
+      const m = firstMOf(morph.major);
+      const expected = MAJOR_STARTS[b.major];
+      log(`  idx ${b.idx}: morph M=(${m.x.toFixed(2)}, ${m.y.toFixed(2)})  vs  path${b.major} M=(${expected.x}, ${expected.y})  | bloomT=(${morph.bloomTx.toFixed(2)}, ${morph.bloomTy.toFixed(2)})`);
+    }
     log("");
-    log(`Cascade T = ${T.toFixed(4)}s  (fixed; total bloom = 4T = ${BLOOM_TOTAL_S.toFixed(4)}s)`);
+    log(`Cascade T = ${T.toFixed(4)}s  (total bloom = 5T = ${BLOOM_TOTAL_S.toFixed(4)}s)`);
     log("Per-pair cascade timing (seconds):");
     for (const b of blooms) {
       const tt = timingFor(b.idx);
-      const motionStr = b.idx === 5
-        ? "(no rotation)"
-        : `motion begin=${tt.beginMotionS.toFixed(4)}s dur=${tt.durMotionS.toFixed(4)}s`;
+      const motionStr = `rotate+translate begin=${tt.beginMotionS.toFixed(4)}s dur=${tt.durMotionS.toFixed(4)}s`;
       const morphStr = b.idx === 1
-        ? "(no morph)"
+        ? "(no morph — leader is canonical)"
         : `morph begin=${tt.beginMorphS.toFixed(4)}s dur=${tt.durMorphS.toFixed(4)}s`;
-      log(`  Pair ${b.idx}: ${motionStr} | ${morphStr}`);
+      log(`  idx ${b.idx}: ${motionStr} | ${morphStr}`);
     }
     log("");
     log(`Spin: dur=${SPIN_DUR_S.toFixed(4)}s/rev (1.5× original 4s), begin=${BLOOM_TOTAL_S.toFixed(4)}s.`);

@@ -4,6 +4,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { getWorkspaceInviteMeta, acceptWorkspaceInvite } from '../api/invites';
 import Logo from '../components/Logo';
+import LotusSpinner from '../components/LotusSpinner';
 import { STORAGE_KEYS, UNIX_MS_MULTIPLIER } from '../utils/constants';
 import { sessionStore } from '../utils/storage';
 
@@ -88,14 +89,7 @@ export default function WorkspaceInvitePage() {
   }
 
   if (!currentUser) {
-    return (
-      <div className="login-page">
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-          <div className="spinner" style={{ width: 32, height: 32 }} />
-          <p style={{ color: 'var(--text-muted)' }}>Redirecting to login…</p>
-        </div>
-      </div>
-    );
+    return <LotusSpinner />;
   }
 
   return (

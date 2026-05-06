@@ -21,6 +21,7 @@ import {
   isBiometricEnrolledLocally,
 } from '../api/biometric';
 import Logo from '../components/Logo';
+import LotusSpinner from '../components/LotusSpinner';
 import PasswordInput from '../components/PasswordInput';
 import RateLimitMessage from '../components/RateLimitMessage';
 import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
@@ -299,14 +300,7 @@ export default function Login() {
     : '';
 
   if (step === 'loading') {
-    return (
-      <div className="login-page">
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-          <div className="spinner" style={{ width: 32, height: 32 }} />
-          <p style={{ color: 'var(--text-muted)' }}>Connecting…</p>
-        </div>
-      </div>
-    );
+    return <LotusSpinner />;
   }
 
   return (

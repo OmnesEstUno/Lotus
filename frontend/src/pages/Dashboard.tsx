@@ -45,6 +45,7 @@ import ExpandedMonthView from '../components/dashboard/ExpandedMonthView';
 import DashboardCard from '../components/dashboard/DashboardCard';
 import Toast from '../components/Toast';
 import EmptyState from '../components/EmptyState';
+import LotusSpinner from '../components/LotusSpinner';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CardId } from '../hooks/useDashboardLayout';
@@ -271,14 +272,7 @@ export default function Dashboard() {
   );
 
   if (loading) {
-    return (
-      <Layout>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: 16 }}>
-          <div className="spinner" />
-          <span style={{ color: 'var(--text-muted)' }}>Loading your financial data…</span>
-        </div>
-      </Layout>
-    );
+    return <LotusSpinner />;
   }
 
   // No active workspace yet — show a neutral empty state instead of an error.

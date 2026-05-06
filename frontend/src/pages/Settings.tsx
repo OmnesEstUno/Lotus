@@ -33,6 +33,7 @@ import DangerZone from '../components/DangerZone';
 import FeatureRequestCard from '../components/FeatureRequestCard';
 import FeatureRequestsAdminCard from '../components/FeatureRequestsAdminCard';
 import Layout from '../components/layout/Layout';
+import LotusSpinner from '../components/LotusSpinner';
 
 interface CardVisibilityRowProps {
   id: CardId;
@@ -228,14 +229,7 @@ export default function Settings() {
   }
 
   if (loading) {
-    return (
-      <Layout>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 16 }}>
-          <div className="spinner" />
-          <span style={{ color: 'var(--text-muted)' }}>Loading settings…</span>
-        </div>
-      </Layout>
-    );
+    return <LotusSpinner />;
   }
 
   return (

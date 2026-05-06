@@ -100,7 +100,16 @@
       "Bash(grep -n \"data-palette.*dark.*{$\\\\|--bg-color\\\\|background-color.*#\" index.css)",
       "Bash(magick -background none -density 600 favicon.svg -resize 410x -gravity center -background none -extent 512x512 icon-512.png)",
       "Bash(magick icon-512.png -resize 192x192 icon-192.png)",
-      "Bash(magick icon-512.png -resize 180x180 apple-touch-icon.png)"
+      "Bash(magick icon-512.png -resize 180x180 apple-touch-icon.png)",
+      "Bash(python3)",
+      "Bash(node --check frontend/public/lotus-animation-preview.html)",
+      "Bash(awk '/<script>/{flag=1; next} /<\\\\/script>/{flag=0} flag' frontend/public/lotus-animation-preview.html)",
+      "Bash(node --check /tmp/lotus-script.js)",
+      "Bash(sed -n '620,640p' frontend/src/index.css)",
+      "Bash(sed -n '1380,1400p' frontend/src/index.css)",
+      "Bash(sed -n '85,120p' frontend/src/pages/WorkspaceInvitePage.tsx)",
+      "Bash(sed -n '230,245p' frontend/src/pages/Settings.tsx)",
+      "Bash(sed -n '300,315p' frontend/src/pages/Login.tsx)"
     ],
     "additionalDirectories": [
       "/tmp",

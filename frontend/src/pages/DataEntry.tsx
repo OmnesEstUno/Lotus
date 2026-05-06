@@ -23,6 +23,7 @@ import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../components/CategorySelect';
 import DuplicateStatusCell, { DuplicateStatus } from '../components/data-entry/DuplicateStatusCell';
+import LotusSpinner from '../components/LotusSpinner';
 import { dialog } from '../utils/dialog';
 
 interface DataEntryProps {
@@ -54,6 +55,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
 
   // Upload state
   const [dragOver, setDragOver] = useState(false);
+  const [csvParsing, setCsvParsing] = useState(false);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [skippedCount, setSkippedCount] = useState(0);
@@ -203,33 +205,43 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
       return;
     }
 
-    const result = await parseTransactionCSV(file, userCategories.mappings);
+    setCsvParsing(true);
+    // Yield to React so the spinner renders BEFORE the parse begins. Papa
+    // Parse can complete synchronously for small files; without this yield,
+    // setCsvParsing(true)/setCsvParsing(false) would batch into one render
+    // and the spinner would never paint a frame.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    try {
+      const result = await parseTransactionCSV(file, userCategories.mappings);
 
-    if (result.errors.length > 0 && result.rows.length === 0) {
-      setParseErrors(result.errors.map((e) => e.message));
-      return;
-    }
-    if (result.errors.length > 0) {
-      setParseErrors(result.errors.map((e) => e.message));
-    }
-    setSkippedCount(result.skippedCount ?? 0);
+      if (result.errors.length > 0 && result.rows.length === 0) {
+        setParseErrors(result.errors.map((e) => e.message));
+        return;
+      }
+      if (result.errors.length > 0) {
+        setParseErrors(result.errors.map((e) => e.message));
+      }
+      setSkippedCount(result.skippedCount ?? 0);
 
-    // Tag each parsed row with a duplicate status + the matching "twin" row
-    // (if any) so the UI can show the user exactly what this row collides
-    // with. Subsequent identical rows in the same batch are also flagged.
-    const seenTxn = new Map<string, ParsedCSVRow>();
-    const seenIncome = new Map<string, ParsedCSVRow>();
-    const tagged: PreviewRow[] = result.rows.map((row, idx) => {
-      const match = findDuplicateMatch(row, existingDedupLookup, seenTxn, seenIncome);
-      recordRowInBatch(row, seenTxn, seenIncome);
-      return {
-        idx,
-        row,
-        duplicateStatus: match ? 'pending' : 'unique',
-        duplicateMatch: match,
-      };
-    });
-    setPreviewRows(tagged);
+      // Tag each parsed row with a duplicate status + the matching "twin" row
+      // (if any) so the UI can show the user exactly what this row collides
+      // with. Subsequent identical rows in the same batch are also flagged.
+      const seenTxn = new Map<string, ParsedCSVRow>();
+      const seenIncome = new Map<string, ParsedCSVRow>();
+      const tagged: PreviewRow[] = result.rows.map((row, idx) => {
+        const match = findDuplicateMatch(row, existingDedupLookup, seenTxn, seenIncome);
+        recordRowInBatch(row, seenTxn, seenIncome);
+        return {
+          idx,
+          row,
+          duplicateStatus: match ? 'pending' : 'unique',
+          duplicateMatch: match,
+        };
+      });
+      setPreviewRows(tagged);
+    } finally {
+      setCsvParsing(false);
+    }
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -555,6 +567,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
 
   return (
     <div>
+      {(csvParsing || incomeParsing) && <LotusSpinner />}
       <div className="data-entry-header">
         <h2 className="data-entry-title">Enter Data</h2>
         <p className="text-muted">

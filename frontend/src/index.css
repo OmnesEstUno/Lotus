@@ -630,6 +630,57 @@ a:hover { color: var(--accent-hover); }
   animation: spin 0.7s linear infinite;
 }
 
+/* ─── LotusSpinner: full-viewport loading splash ─────────────────────────── */
+.lotus-spinner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Theme-aware backdrop: current palette's bg-base at 70% opacity + 5px
+     backdrop-blur over the page content. color-mix gives us "var(--bg-base)
+     at 70% alpha" without hard-coding an rgba(). */
+  background: color-mix(in srgb, var(--bg-base) 70%, transparent);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+.lotus-spinner-svg {
+  width: 192px;
+  height: auto;
+  display: block;
+  /* Allow the rotated lotus to extend past the viewBox boundary into the
+     empty space of the overlay. Without this, parts of the petals get
+     clipped on the right and bottom during rotation because the bloomed
+     lotus is wider than the viewBox half-dimension. */
+  overflow: visible;
+}
+@keyframes lotus-spinner-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.lotus-spinner-rotor {
+  /* `transform-box: view-box` makes transform-origin's lengths resolve in
+     SVG viewBox units. The lotus's TRUE visual center is at (89.17, 83.70)
+     — empirically computed by averaging the five major-path M-points after
+     each pair's per-pair rotation AND the outer rotate(-56.8, 70.26, 97.19).
+     (The Inkscape-edited bloomed-reference uses different per-pair rotation
+     centers than the favicon's bloom pivot, so the lotus's visual center
+     in the bloomed file is offset ~15 units east of where the favicon math
+     would suggest.) */
+  transform-box: view-box;
+  transform-origin: 89.17px 83.70px;
+  animation: lotus-spinner-rotate 3s linear infinite;
+}
+/* A loading spinner's rotation is FUNCTIONAL motion (it conveys "in
+   progress"), not decorative — so override the global reduce-motion stop
+   for just this element. The blurred backdrop is static; only the lotus
+   spins. */
+[data-reduce-motion="on"] .lotus-spinner-rotor {
+  animation: lotus-spinner-rotate 3s linear infinite !important;
+  animation-iteration-count: infinite !important;
+}
+
 /* ─── Utilities ──────────────────────────────────────────────────────────── */
 .flex { display: flex; }
 .flex-col { flex-direction: column; }

@@ -109,7 +109,16 @@
       "Bash(sed -n '1380,1400p' frontend/src/index.css)",
       "Bash(sed -n '85,120p' frontend/src/pages/WorkspaceInvitePage.tsx)",
       "Bash(sed -n '230,245p' frontend/src/pages/Settings.tsx)",
-      "Bash(sed -n '300,315p' frontend/src/pages/Login.tsx)"
+      "Bash(sed -n '300,315p' frontend/src/pages/Login.tsx)",
+      "Bash(command -v rsvg-convert convert magick inkscape)",
+      "Bash(convert --version)",
+      "Bash(fc-list)",
+      "Bash(magick -list font)",
+      "Bash(mkdir -p /tmp/og-build)",
+      "Bash(sed -n '/<path/,/\\\\/>/p' frontend/public/favicon.svg)",
+      "Bash(magick /tmp/og-build/test-text.svg /tmp/og-build/test-text.png)",
+      "Bash(magick identify *)",
+      "Bash(cp /tmp/og-build/og-image-logo.png /tmp/og-build/og-image-wordmark.png /tmp/og-build/og-image-tagline.png /home/Grey/Projects/Lotus/frontend/public/ && ls -la /home/Grey/Projects/Lotus/frontend/public/og-image-*.png)"
     ],
     "additionalDirectories": [
       "/tmp",
@@ -119,7 +128,8 @@
       "/home/Grey/Projects/Lotus/docs/superpowers/specs",
       "/var/home/Grey/Projects/Lotus/docs/superpowers/specs",
       "/home/Grey/Projects/Lotus",
-      "/var/home/Grey/Projects/Lotus"
+      "/var/home/Grey/Projects/Lotus",
+      "/tmp/og-build"
     ]
   }
 }

@@ -8,11 +8,11 @@ binding = "FINANCE_KV"
 id = "ddbca44da4b548c8b9d918d542475468"
 
 [vars]
-ALLOWED_ORIGIN = "https://omnesestuno.github.io"
+ALLOWED_ORIGIN = "https://lotus-finance.me"
 # WebAuthn relying party: replace with your production domain before deploy.
 # RP_ID is the host (no scheme, no path); RP_ORIGIN is the full origin.
-RP_ID = "omnesestuno.github.io"
-RP_ORIGIN = "https://omnesestuno.github.io"
+RP_ID = "lotus-finance.me"
+RP_ORIGIN = "https://lotus-finance.me"
 
 # Secrets (set via `wrangler secret put <NAME>`):
 #   JWT_SECRET            — signing key for session tokens

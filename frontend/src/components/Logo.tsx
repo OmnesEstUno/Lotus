@@ -15,7 +15,7 @@ interface LogoProps {
  *
  * The SVG lives in `public/favicon.svg` (referenced from `index.html` as
  * the browser tab icon too); we resolve it via `import.meta.env.BASE_URL`
- * so it works under Vite's configured `base` path (`/Lotus/` in this app).
+ * so it adapts if Vite's `base` path ever changes.
  *
  * Source SVG is 180×120 → width is 1.5× the height.
  */

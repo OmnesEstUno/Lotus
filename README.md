@@ -36,8 +36,8 @@ wrangler kv namespace create FINANCE_KV
 # Set the JWT secret (any long random string)
 wrangler secret put JWT_SECRET
 
-# Set your GitHub Pages origin to restrict CORS
-wrangler secret put ALLOWED_ORIGIN   # e.g. https://omnesestuno.github.io
+# Set your site origin to restrict CORS
+wrangler secret put ALLOWED_ORIGIN   # e.g. https://lotus-finance.me
 
 # Deploy
 wrangler deploy

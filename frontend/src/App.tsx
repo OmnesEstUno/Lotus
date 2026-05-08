@@ -16,6 +16,7 @@ export default function App() {
       <DataEntryProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Login />} />
           <Route path="/workspace-invite" element={<WorkspaceInvitePage />} />
           <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
           <Route path="/settings" element={<ProtectedRoute element={<Settings />} />} />

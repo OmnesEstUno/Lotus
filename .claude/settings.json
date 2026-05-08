@@ -118,7 +118,9 @@
       "Bash(sed -n '/<path/,/\\\\/>/p' frontend/public/favicon.svg)",
       "Bash(magick /tmp/og-build/test-text.svg /tmp/og-build/test-text.png)",
       "Bash(magick identify *)",
-      "Bash(cp /tmp/og-build/og-image-logo.png /tmp/og-build/og-image-wordmark.png /tmp/og-build/og-image-tagline.png /home/Grey/Projects/Lotus/frontend/public/ && ls -la /home/Grey/Projects/Lotus/frontend/public/og-image-*.png)"
+      "Bash(cp /tmp/og-build/og-image-logo.png /tmp/og-build/og-image-wordmark.png /tmp/og-build/og-image-tagline.png /home/Grey/Projects/Lotus/frontend/public/ && ls -la /home/Grey/Projects/Lotus/frontend/public/og-image-*.png)",
+      "Bash(curl -sI https://lotus-finance.me/og-image-tagline.png)",
+      "Bash(curl -s https://lotus-finance.me/)"
     ],
     "additionalDirectories": [
       "/tmp",

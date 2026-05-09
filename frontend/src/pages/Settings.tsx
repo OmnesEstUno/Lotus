@@ -24,6 +24,7 @@ import { useSortableListReorder } from '../hooks/useSortableListReorder';
 import { CSS } from '@dnd-kit/utilities';
 import CollapsibleCard from '../components/CollapsibleCard';
 import InviteTokensCard from '../components/InviteTokensCard';
+import PasswordResetTokensCard from '../components/PasswordResetTokensCard';
 import ToggleSwitch from '../components/ToggleSwitch';
 import WorkspacesCard from '../components/WorkspacesCard';
 import AccessibilityCard from '../components/AccessibilityCard';
@@ -259,6 +260,9 @@ export default function Settings() {
 
       {/* ─── Admin: Invite Tokens ─────────────────────────── */}
       {currentUser === 'admin' && <InviteTokensCard />}
+
+      {/* ─── Admin: Password reset links ──────────────────── */}
+      {currentUser === 'admin' && <PasswordResetTokensCard />}
 
       {/* ─── Workspaces ───────────────────────────────────── */}
       <WorkspacesCard />

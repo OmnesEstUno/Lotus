@@ -46,6 +46,7 @@ import DashboardCard from '../components/dashboard/DashboardCard';
 import Toast from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import LotusSpinner from '../components/LotusSpinner';
+import BiometricPromptModal from '../components/BiometricPromptModal';
 import { useUserCategories } from '../hooks/useUserCategories';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useDashboardLayout, CardId } from '../hooks/useDashboardLayout';
@@ -686,6 +687,7 @@ export default function Dashboard() {
           duration={6000}
         />
       )}
+      <BiometricPromptModal />
     </Layout>
   );
 }

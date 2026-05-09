@@ -104,3 +104,77 @@ export async function migrateLegacy(username: string, password: string): Promise
     body: JSON.stringify({ username, password }),
   });
 }
+
+// ─── Forgot password (self-service) ──────────────────────────────────────────
+
+export interface ForgotBeginResult {
+  pwresetToken: string;
+  needsWebauthn: boolean;
+}
+
+export async function forgotBegin(username: string, totpCode: string): Promise<ForgotBeginResult> {
+  return request('/api/auth/forgot-begin', {
+    method: 'POST',
+    body: JSON.stringify({ username, totpCode }),
+  });
+}
+
+export async function forgotWebauthnBegin(pwresetToken: string): Promise<{ options: unknown }> {
+  return request('/api/auth/forgot-webauthn-begin', {
+    method: 'POST',
+    body: JSON.stringify({ pwresetToken }),
+  });
+}
+
+export async function forgotWebauthnFinish(pwresetToken: string, authenticationResponse: unknown): Promise<{ pwresetToken: string }> {
+  return request('/api/auth/forgot-webauthn-finish', {
+    method: 'POST',
+    body: JSON.stringify({ pwresetToken, authenticationResponse }),
+  });
+}
+
+export async function forgotConfirm(pwresetToken: string, newPassword: string): Promise<{ ok: true }> {
+  return request('/api/auth/forgot-confirm', {
+    method: 'POST',
+    body: JSON.stringify({ pwresetToken, newPassword }),
+  });
+}
+
+// ─── Admin-issued reset (redeem) ─────────────────────────────────────────────
+
+export async function adminResetMeta(token: string): Promise<{ username: string; expiresAt: number }> {
+  return request(`/api/auth/admin-reset-meta?token=${encodeURIComponent(token)}`);
+}
+
+export async function adminResetRedeem(token: string, newPassword: string): Promise<{ ok: true }> {
+  return request('/api/auth/admin-reset-redeem', {
+    method: 'POST',
+    body: JSON.stringify({ token, newPassword }),
+  });
+}
+
+// ─── Admin: password-reset-token CRUD ────────────────────────────────────────
+
+export interface AdminResetTokenSummary {
+  id: string;
+  token: string;
+  username: string;
+  createdAt: number;
+  expiresAt: number;
+  usedBy: string | null;
+}
+
+export async function createAdminResetToken(username: string): Promise<{ id: string; token: string; username: string; expiresAt: number }> {
+  return request('/api/admin/password-reset-tokens', {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+  });
+}
+
+export async function listAdminResetTokens(): Promise<{ tokens: AdminResetTokenSummary[] }> {
+  return request('/api/admin/password-reset-tokens');
+}
+
+export async function deleteAdminResetToken(id: string): Promise<void> {
+  return request(`/api/admin/password-reset-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

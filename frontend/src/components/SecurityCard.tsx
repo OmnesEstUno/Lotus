@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent } from 'react';
 import { startRegistration } from '@simplewebauthn/browser';
 import CollapsibleCard from './CollapsibleCard';
 import RateLimitMessage from './RateLimitMessage';
@@ -15,6 +15,8 @@ import {
 import { getCurrentUsername } from '../api/auth';
 import { defaultDeviceLabel } from '../utils/webauthnUserAgent';
 import { dialog } from '../utils/dialog';
+import { sessionStore } from '../utils/storage';
+import { STORAGE_KEYS } from '../utils/constants';
 
 function formatRelative(timestamp: number | null): string {
   if (timestamp === null) return 'Never used';
@@ -43,6 +45,9 @@ export default function SecurityCard() {
   const [error, setError] = useState('');
   const [reauthOpen, setReauthOpen] = useState(false);
   const [totpCode, setTotpCode] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlightAdd, setHighlightAdd] = useState(false);
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -54,6 +59,24 @@ export default function SecurityCard() {
       setLoading(false);
     });
   }, []);
+
+  // Onboarding focus: when the biometric prompt modal redirects here, expand
+  // the card, scroll its Add button into view, and pulse a highlight ring.
+  useEffect(() => {
+    if (loading) return;
+    if (sessionStore.get(STORAGE_KEYS.SETTINGS_FOCUS_SECURITY) !== '1') return;
+    sessionStore.remove(STORAGE_KEYS.SETTINGS_FOCUS_SECURITY);
+    setOpen(true);
+    const scrollTimer = window.setTimeout(() => {
+      addButtonRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightAdd(true);
+    }, 250);
+    const clearTimer = window.setTimeout(() => setHighlightAdd(false), 3000);
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [loading]);
 
   async function handleAdd(totpCodeArg?: string): Promise<void> {
     setError('');
@@ -114,7 +137,7 @@ export default function SecurityCard() {
   }
 
   return (
-    <CollapsibleCard title="Security">
+    <CollapsibleCard title="Security" open={open} onOpenChange={setOpen}>
       <h3 style={{ marginBottom: 8 }}>Biometric devices</h3>
       {loading ? (
         <p className="security-empty">Loading…</p>
@@ -187,7 +210,8 @@ export default function SecurityCard() {
       ) : (
         <>
           <button
-            className="btn btn-primary security-add-button"
+            ref={addButtonRef}
+            className={`btn btn-primary security-add-button${highlightAdd ? ' is-highlighted' : ''}`}
             onClick={() => handleAdd()}
             disabled={busy || !supported}
           >

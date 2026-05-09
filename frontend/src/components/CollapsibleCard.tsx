@@ -4,8 +4,12 @@ interface Props {
   title: string;
   /** Extra content rendered to the right of the title (badges, counts, etc.). */
   headerExtra?: ReactNode;
-  /** Default open state. Defaults to false (collapsed). */
+  /** Default open state. Defaults to false (collapsed). Ignored if `open` is provided. */
   defaultOpen?: boolean;
+  /** Controlled open state. When set, the parent owns visibility. */
+  open?: boolean;
+  /** Called when the user toggles the card. */
+  onOpenChange?: (open: boolean) => void;
   /** Optional inline styles forwarded to the outer .card div. */
   cardStyle?: CSSProperties;
   /** Optional inline styles forwarded to the title h2. */
@@ -22,11 +26,21 @@ export default function CollapsibleCard({
   title,
   headerExtra,
   defaultOpen = false,
+  open: controlledOpen,
+  onOpenChange,
   cardStyle,
   titleStyle,
   children,
 }: Props) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+
+  const toggle = () => {
+    const next = !open;
+    if (!isControlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
 
   return (
     <div className="card" style={cardStyle}>
@@ -35,7 +49,7 @@ export default function CollapsibleCard({
           type="button"
           className="collapsible-card-toggle"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggle}
         >
           <h2 className="collapsible-card-title" style={titleStyle}>{title}</h2>
           <span

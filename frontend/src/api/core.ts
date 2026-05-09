@@ -19,6 +19,21 @@ export class ConflictError extends Error {
 }
 
 /**
+ * Thrown for any 401 response. Carries the worker's actual error message and,
+ * when applicable, the number of remaining login attempts before lockout —
+ * letting callers (e.g. the login screen) render a precise warning instead of
+ * the generic "Session expired" fallback.
+ */
+export class AuthError extends Error {
+  public readonly attemptsRemaining: number | undefined;
+  constructor(message: string, attemptsRemaining?: number) {
+    super(message);
+    this.name = 'AuthError';
+    this.attemptsRemaining = attemptsRemaining;
+  }
+}
+
+/**
  * Module-level store for the last known version of each versioned resource.
  * Keyed by resource name: 'transactions', 'income', 'userCategories'.
  * Read functions populate this automatically; mutation functions read from it.
@@ -124,13 +139,22 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
 
   if (res.status === 401) {
+    const body = await res.json().catch(() => null) as { error?: string; attemptsRemaining?: number } | null;
     clearToken();
     storage.remove(STORAGE_KEYS.USERNAME);
     notifyUsernameChange(null);
     storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);
     notifyActiveInstanceChange(null);
     window.location.hash = '#/login';
-    throw new Error('Session expired. Please log in again.');
+    // Use the worker's specific message when present (e.g. "Invalid credentials.")
+    // so the calling screen can format a precise warning. Fall back to the
+    // generic session-expired string when the worker only returned "Unauthorized"
+    // (i.e. the JWT-rejection path) or when the body wasn't parseable.
+    const workerMsg = body?.error;
+    const message = workerMsg && workerMsg !== 'Unauthorized'
+      ? workerMsg
+      : 'Session expired. Please log in again.';
+    throw new AuthError(message, body?.attemptsRemaining);
   }
 
   if (res.status === 409) {

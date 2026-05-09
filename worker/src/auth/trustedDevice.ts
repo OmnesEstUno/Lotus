@@ -82,3 +82,24 @@ export async function rotateTrustedDevice(
   }
   return issueTrustedDevice(kv, secret, username);
 }
+
+/**
+ * Revoke every trusted-device token bound to a given username. Used during
+ * password reset to ensure all existing sessions on all devices are terminated.
+ */
+export async function revokeAllTrustedDevicesForUser(
+  kv: KVNamespace,
+  username: string,
+): Promise<void> {
+  const listed = await kv.list({ prefix: 'auth:trusted-device:' });
+  await Promise.all(listed.keys.map(async (k) => {
+    const raw = await kv.get(k.name);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { username?: string };
+      if (parsed.username === username) await kv.delete(k.name);
+    } catch {
+      /* ignore malformed entries */
+    }
+  }));
+}

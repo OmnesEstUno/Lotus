@@ -120,7 +120,9 @@
       "Bash(magick identify *)",
       "Bash(cp /tmp/og-build/og-image-logo.png /tmp/og-build/og-image-wordmark.png /tmp/og-build/og-image-tagline.png /home/Grey/Projects/Lotus/frontend/public/ && ls -la /home/Grey/Projects/Lotus/frontend/public/og-image-*.png)",
       "Bash(curl -sI https://lotus-finance.me/og-image-tagline.png)",
-      "Bash(curl -s https://lotus-finance.me/)"
+      "Bash(curl -s https://lotus-finance.me/)",
+      "WebFetch(domain:developer.1password.com)",
+      "Bash(grep -nE \"KV_PREFIXES\\\\.|users:\\\\\\\\\\\\$\\\\\\\\\\\\{|invites:\\\\\\\\\\\\$\\\\\\\\\\\\{|preauth:\\\\\\\\\\\\$\\\\\\\\\\\\{\" worker/src/constants.ts worker/src/index.ts)"
     ],
     "additionalDirectories": [
       "/tmp",

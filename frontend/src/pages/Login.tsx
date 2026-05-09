@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react';
 import { startAuthentication } from '@simplewebauthn/browser';
+import TotpEnrollStep from '../components/TotpEnrollStep';
 import {
   getSetupStatus,
   initSetup,
@@ -12,8 +12,14 @@ import {
   isAuthenticated,
   getTrustedDeviceToken,
   clearTrustedDeviceToken,
+  forgotBegin,
+  forgotWebauthnBegin,
+  forgotWebauthnFinish,
+  forgotConfirm,
+  adminResetMeta,
+  adminResetRedeem,
 } from '../api/auth';
-import { notifyUsernameChange } from '../api/core';
+import { notifyUsernameChange, AuthError } from '../api/core';
 import {
   trustedSecondFactor,
   authenticateBegin,
@@ -34,7 +40,11 @@ type Step =
   | 'setup-totp'
   | 'setup-confirm'
   | 'login-password'
-  | 'login-totp';
+  | 'login-totp'
+  | 'forgot-username-totp'
+  | 'forgot-webauthn'
+  | 'forgot-new-password'
+  | 'admin-reset';
 
 // Shared back-button style used on every step that has one
 const backButtonStyle: React.CSSProperties = {
@@ -67,18 +77,43 @@ export default function Login() {
   const [oldTrustedDeviceTokenId, setOldTrustedDeviceTokenId] = useState<string | null>(null);
   const [biometricPrompted, setBiometricPrompted] = useState(false);
   const biometricCancelledRef = useRef(false);
+  // Self-service forgot-password state
+  const [pwresetToken, setPwresetToken] = useState('');
+  // Admin-issued reset state (deep-link path)
+  const [adminResetToken, setAdminResetToken] = useState('');
+  const [adminResetUsername, setAdminResetUsername] = useState('');
 
   useEffect(() => {
     if (isAuthenticated()) {
       navigate('/dashboard');
       return;
     }
-    // Check for deep-link invite token in the hash (#/signup?token=...)
+    // Deep-link: admin-issued password reset (#/reset?token=...)
     const hash = window.location.hash;
-    const match = hash.match(/[?&]token=([^&]+)/);
-    if (match) {
+    const resetMatch = hash.match(/^#\/reset\?(?:.*&)?token=([^&]+)/);
+    if (resetMatch) {
       let decoded: string;
-      try { decoded = decodeURIComponent(match[1]); }
+      try { decoded = decodeURIComponent(resetMatch[1]); }
+      catch { return; }
+      setAdminResetToken(decoded);
+      setStep('loading');
+      adminResetMeta(decoded)
+        .then(({ username }) => {
+          setAdminResetUsername(username);
+          setStep('admin-reset');
+        })
+        .catch((e: Error) => {
+          setError(e.message || 'This reset link is invalid or has expired.');
+          setStep('login-password');
+        });
+      history.replaceState(null, '', window.location.pathname + window.location.search + '#/reset');
+      return;
+    }
+    // Deep-link: invite (#/signup?token=...)
+    const inviteMatch = hash.match(/[?&]token=([^&]+)/);
+    if (inviteMatch) {
+      let decoded: string;
+      try { decoded = decodeURIComponent(inviteMatch[1]); }
       catch { return; }
       setInviteToken(decoded);
       setStep('setup-password');
@@ -237,6 +272,8 @@ export default function Login() {
     setLoading(true);
     try {
       await confirmSetup(username, totpCode, setupToken);
+      // Trigger one-time biometric onboarding modal on first dashboard mount.
+      storage.set(STORAGE_KEYS.BIOMETRIC_PROMPT_PENDING, '1');
       setStep('login-password');
       setPassword('');
       setTotpCode('');
@@ -262,7 +299,16 @@ export default function Login() {
       setStep('login-totp');
     } catch (err) {
       console.error(err);
-      setError((err as Error).message || 'Incorrect username or password. Please try again.');
+      if (err instanceof AuthError && typeof err.attemptsRemaining === 'number') {
+        const tries = err.attemptsRemaining;
+        if (tries === 0) {
+          setError('Username or password incorrect. The next attempt will lock the account briefly.');
+        } else {
+          setError(`Username or password incorrect. You have ${tries} ${tries === 1 ? 'try' : 'tries'} remaining before lockout.`);
+        }
+      } else {
+        setError((err as Error).message || 'Incorrect username or password. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -290,6 +336,101 @@ export default function Login() {
     } catch (err) {
       console.error(err);
       setError((err as Error).message || 'The verification code is incorrect or has expired. Please check your authenticator app and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Forgot password (self-service) ──
+
+  async function handleForgotBegin(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (totpCode.length !== 6) {
+      setError('Please enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const trimmed = username.trim().toLowerCase();
+      const { pwresetToken: token, needsWebauthn } = await forgotBegin(trimmed, totpCode);
+      setUsername(trimmed);
+      setPwresetToken(token);
+      setTotpCode('');
+      setStep(needsWebauthn ? 'forgot-webauthn' : 'forgot-new-password');
+    } catch (err) {
+      setError((err as Error).message || 'Could not start password reset.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runForgotWebauthn(): Promise<void> {
+    setError('');
+    setLoading(true);
+    try {
+      const { options } = await forgotWebauthnBegin(pwresetToken);
+      const assertion = await startAuthentication({ optionsJSON: options as never });
+      const { pwresetToken: nextToken } = await forgotWebauthnFinish(pwresetToken, assertion);
+      setPwresetToken(nextToken);
+      setStep('forgot-new-password');
+    } catch (err) {
+      setError((err as Error).message || 'Verification was cancelled or failed.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleForgotConfirm(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError('Your password must be at least 8 characters long.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('The passwords you entered do not match. Please try again.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await forgotConfirm(pwresetToken, password);
+      // Wipe local trusted-device token (server has revoked it anyway).
+      clearTrustedDeviceToken();
+      setPassword('');
+      setConfirmPassword('');
+      setPwresetToken('');
+      setStep('login-password');
+    } catch (err) {
+      setError((err as Error).message || 'Could not set new password.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Admin-issued reset (deep-link) ──
+
+  async function handleAdminResetConfirm(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError('Your password must be at least 8 characters long.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('The passwords you entered do not match. Please try again.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await adminResetRedeem(adminResetToken, password);
+      clearTrustedDeviceToken();
+      setPassword('');
+      setConfirmPassword('');
+      setAdminResetToken('');
+      setStep('login-password');
+    } catch (err) {
+      setError((err as Error).message || 'Could not set new password.');
     } finally {
       setLoading(false);
     }
@@ -356,6 +497,8 @@ export default function Login() {
               ? 'Claim your existing data'
               : step === 'setup-password' || step === 'setup-totp' || step === 'setup-confirm'
               ? 'First-time setup'
+              : step === 'forgot-username-totp' || step === 'forgot-webauthn' || step === 'forgot-new-password' || step === 'admin-reset'
+              ? 'Reset your password'
               : 'Sign in to your account'}
           </p>
         </div>
@@ -387,8 +530,10 @@ export default function Login() {
               A previous single-user setup was detected. Choose a username and enter your existing password to migrate your data to the new format.
             </p>
             <div className="form-group">
-              <label className="form-label">Choose a username</label>
+              <label className="form-label" htmlFor="migrate-username">Choose a username</label>
               <input
+                id="migrate-username"
+                name="username"
                 type="text"
                 className="input"
                 value={username}
@@ -403,13 +548,16 @@ export default function Login() {
               </p>
             </div>
             <div className="form-group">
-              <label className="form-label">Existing password</label>
+              <label className="form-label" htmlFor="migrate-password">Existing password</label>
               <PasswordInput
+                id="migrate-password"
+                name="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Your current password"
                 autoComplete="current-password"
                 required
+                maxLength={256}
               />
             </div>
             <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
@@ -425,8 +573,10 @@ export default function Login() {
               Create a username, password, and set up two-factor authentication to protect your financial data.
             </p>
             <div className="form-group">
-              <label className="form-label">Invite token</label>
+              <label className="form-label" htmlFor="setup-invite-token">Invite token</label>
               <input
+                id="setup-invite-token"
+                name="invite-token"
                 type="text"
                 className="input"
                 value={inviteToken}
@@ -437,8 +587,10 @@ export default function Login() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Username</label>
+              <label className="form-label" htmlFor="setup-username">Username</label>
               <input
+                id="setup-username"
+                name="username"
                 type="text"
                 className="input"
                 value={username}
@@ -453,24 +605,33 @@ export default function Login() {
               </p>
             </div>
             <div className="form-group">
-              <label className="form-label">Password</label>
+              <label className="form-label" htmlFor="setup-password">Password</label>
               <PasswordInput
+                id="setup-password"
+                name="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Min. 8 characters"
                 autoComplete="new-password"
                 required
                 minLength={PASSWORD_MIN_LENGTH}
+                maxLength={256}
+                passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Confirm password</label>
+              <label className="form-label" htmlFor="setup-confirm-password">Confirm password</label>
               <PasswordInput
+                id="setup-confirm-password"
+                name="confirm-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter your password"
                 autoComplete="new-password"
                 required
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={256}
+                passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
               />
             </div>
             <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
@@ -488,45 +649,11 @@ export default function Login() {
 
         {/* Setup Step 2: QR Code */}
         {step === 'setup-totp' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
-            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.), then enter the 6-digit code to confirm.
-            </p>
-            <div
-              style={{
-                padding: 16,
-                background: '#fff',
-                borderRadius: 12,
-              }}
-            >
-              <QRCodeSVG value={otpauthUrl} size={180} />
-            </div>
-            <div
-              style={{
-                background: 'var(--bg-surface)',
-                borderRadius: 8,
-                padding: '10px 16px',
-                width: '100%',
-                textAlign: 'center',
-              }}
-            >
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Manual entry code</p>
-              <code
-                style={{
-                  fontSize: '0.875rem',
-                  color: 'var(--accent)',
-                  letterSpacing: '0.1em',
-                  fontFamily: 'monospace',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {totpSecret}
-              </code>
-            </div>
-            <button className="btn btn-primary w-full" onClick={() => setStep('setup-confirm')}>
-              I've scanned the code
-            </button>
-          </div>
+          <TotpEnrollStep
+            otpauthUrl={otpauthUrl}
+            secret={totpSecret}
+            onContinue={() => setStep('setup-confirm')}
+          />
         )}
 
         {/* Setup Step 3: Confirm TOTP */}
@@ -536,8 +663,10 @@ export default function Login() {
               Enter the 6-digit code from your authenticator app to confirm setup.
             </p>
             <div className="form-group">
-              <label className="form-label">Verification code</label>
+              <label className="form-label" htmlFor="setup-totp-code">Verification code</label>
               <input
+                id="setup-totp-code"
+                name="otp"
                 type="text"
                 inputMode="numeric"
                 className="input"
@@ -559,8 +688,10 @@ export default function Login() {
         {step === 'login-password' && (
           <form onSubmit={handleLogin} className="login-form">
             <div className="form-group">
-              <label className="form-label">Username</label>
+              <label className="form-label" htmlFor="login-username">Username</label>
               <input
+                id="login-username"
+                name="username"
                 type="text"
                 className="input"
                 value={username}
@@ -572,24 +703,40 @@ export default function Login() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Password</label>
+              <label className="form-label" htmlFor="login-password">Password</label>
               <PasswordInput
+                id="login-password"
+                name="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter your password"
                 autoComplete="current-password"
                 required
+                maxLength={256}
               />
+              <button
+                type="button"
+                onClick={() => {
+                  setError('');
+                  setTotpCode('');
+                  setStep('forgot-username-totp');
+                }}
+                style={{
+                  alignSelf: 'flex-start',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  marginTop: 4,
+                  color: 'var(--accent)',
+                  fontSize: '0.8125rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Forgot password?
+              </button>
             </div>
             <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
               {loading ? <span className="spinner" /> : 'Continue'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost w-full"
-              onClick={() => { setStep('setup-password'); setError(''); }}
-            >
-              Sign up
             </button>
           </form>
         )}
@@ -602,8 +749,10 @@ export default function Login() {
                 Enter the 6-digit code from your authenticator app.
               </p>
               <div className="form-group">
-                <label className="form-label">Authentication code</label>
+                <label className="form-label" htmlFor="login-totp-code">Authentication code</label>
                 <input
+                  id="login-totp-code"
+                  name="otp"
                   type="text"
                   inputMode="numeric"
                   className="input"
@@ -618,28 +767,7 @@ export default function Login() {
               <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
                 {loading ? <span className="spinner" /> : 'Verify'}
               </button>
-              <button
-                type="button"
-                className="btn btn-ghost w-full"
-                onClick={() => { setStep('setup-password'); setError(''); }}
-              >
-                Sign up
-              </button>
             </form>
-            {hasBiometricCreds && (
-              <button
-                type="button"
-                className="btn btn-ghost w-full"
-                onClick={() => {
-                  biometricCancelledRef.current = true;
-                  setHasBiometricCreds(false);
-                  setBiometricPrompted(true);
-                }}
-                style={{ marginTop: 8 }}
-              >
-                Use authenticator code instead
-              </button>
-            )}
             <button
               type="button"
               className="btn btn-ghost w-full"
@@ -660,6 +788,182 @@ export default function Login() {
               Sign in as a different account
             </button>
           </>
+        )}
+
+        {/* Forgot password Step 1: username + TOTP */}
+        {step === 'forgot-username-totp' && (
+          <form onSubmit={handleForgotBegin} className="login-form">
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              Enter your username and the current 6-digit code from your authenticator app to start a password reset.
+            </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="forgot-username">Username</label>
+              <input
+                id="forgot-username"
+                name="username"
+                type="text"
+                className="input"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Your username"
+                autoComplete="username"
+                autoFocus
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="forgot-totp-code">Authentication code</label>
+              <input
+                id="forgot-totp-code"
+                name="otp"
+                type="text"
+                inputMode="numeric"
+                className="input"
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                autoComplete="one-time-code"
+                style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+              {loading ? <span className="spinner" /> : 'Continue'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost w-full"
+              onClick={() => { setError(''); setTotpCode(''); setStep('login-password'); }}
+            >
+              Back to sign in
+            </button>
+          </form>
+        )}
+
+        {/* Forgot password Step 2: WebAuthn (any registered factor) */}
+        {step === 'forgot-webauthn' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
+            <span
+              className="material-symbols-outlined"
+              aria-hidden="true"
+              style={{ fontSize: 48, color: 'var(--accent)' }}
+            >
+              fingerprint
+            </span>
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
+              One more step. Verify with a security key or biometric you've previously registered for this account.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary btn-lg w-full"
+              onClick={() => void runForgotWebauthn()}
+              disabled={loading}
+            >
+              {loading ? <span className="spinner" /> : 'Verify identity'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost w-full"
+              onClick={() => { setError(''); setPwresetToken(''); setStep('login-password'); }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Forgot password Step 3: new password */}
+        {step === 'forgot-new-password' && (
+          <form onSubmit={handleForgotConfirm} className="login-form">
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              Choose a new password for <strong>{username}</strong>. All other sessions will be signed out.
+            </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="forgot-new-password">New password</label>
+              <PasswordInput
+                id="forgot-new-password"
+                name="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Min. 8 characters"
+                autoComplete="new-password"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={256}
+                passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="forgot-confirm-password">Confirm password</label>
+              <PasswordInput
+                id="forgot-confirm-password"
+                name="confirm-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter your new password"
+                autoComplete="new-password"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={256}
+                passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+              {loading ? <span className="spinner" /> : 'Set new password'}
+            </button>
+          </form>
+        )}
+
+        {/* Admin-issued reset link */}
+        {step === 'admin-reset' && (
+          <form onSubmit={handleAdminResetConfirm} className="login-form">
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              Set a new password for <strong>{adminResetUsername}</strong>. All other sessions will be signed out.
+            </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="admin-reset-username">Username</label>
+              <input
+                id="admin-reset-username"
+                name="username"
+                type="text"
+                className="input"
+                value={adminResetUsername}
+                readOnly
+                autoComplete="username"
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="admin-reset-new-password">New password</label>
+              <PasswordInput
+                id="admin-reset-new-password"
+                name="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Min. 8 characters"
+                autoComplete="new-password"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={256}
+                passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="admin-reset-confirm-password">Confirm password</label>
+              <PasswordInput
+                id="admin-reset-confirm-password"
+                name="confirm-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter your new password"
+                autoComplete="new-password"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={256}
+                passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+              {loading ? <span className="spinner" /> : 'Set new password'}
+            </button>
+          </form>
         )}
       </div>
     </div>

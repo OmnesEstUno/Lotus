@@ -2,22 +2,29 @@ import { useState } from 'react';
 
 interface PasswordInputProps {
   id?: string;
+  name?: string;
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   placeholder?: string;
   autoComplete?: string;
   required?: boolean;
   minLength?: number;
+  maxLength?: number;
+  /** Apple Password Manager Resources rule string (e.g. "minlength: 8;"). */
+  passwordrules?: string;
 }
 
 export default function PasswordInput({
   id,
+  name,
   value,
   onChange,
   placeholder,
   autoComplete,
   required,
   minLength,
+  maxLength,
+  passwordrules,
 }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
 
@@ -25,6 +32,7 @@ export default function PasswordInput({
     <div style={{ position: 'relative' }}>
       <input
         id={id}
+        name={name}
         type={visible ? 'text' : 'password'}
         className="input"
         value={value}
@@ -33,12 +41,15 @@ export default function PasswordInput({
         autoComplete={autoComplete}
         required={required}
         minLength={minLength}
-        style={{ paddingRight: 44 }}
+        maxLength={maxLength}
+        {...(passwordrules ? { passwordrules } : {})}
+        style={{ width: '100%', paddingRight: 44 }}
       />
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
         aria-label={visible ? 'Hide password' : 'Show password'}
+        title={visible ? 'Hide password' : 'Show password'}
         style={{
           position: 'absolute',
           right: 10,

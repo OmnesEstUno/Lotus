@@ -1,7 +1,9 @@
 export const JWT_TTL_SECONDS = 86400; // 1 day
-export const PREAUTH_TTL_SECONDS = 300;
+export const PREAUTH_TTL_SECONDS = 600;
 export const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const WORKSPACE_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const PASSWORD_RESET_TOKEN_TTL_SECONDS = 24 * 60 * 60;       // 24 hours, admin-issued reset link
+export const PWRESET_PREAUTH_TTL_SECONDS = 600;                     // 10 minutes, between TOTP and WebAuthn during self-reset
 
 export const MAX_BATCH_SIZE = 1000;       // for bulk POST/PUT/DELETE
 export const MAX_BULK_IDS = 10_000;
@@ -22,6 +24,9 @@ export const KV_PREFIXES = {
   RATELIMIT_WEBAUTHN_REGISTER: (username: string) => `ratelimit:webauthn-register:${username}`,
   RATELIMIT_WEBAUTHN_VERIFY: (username: string) => `ratelimit:webauthn-verify:${username}`,
   RATELIMIT_TRUSTED_DEVICE: (ip: string) => `ratelimit:trusted-device:${ip}`,
+  // ─── Password reset ───
+  PWRESET_PREAUTH: (id: string) => `pwreset:preauth:${id}`,
+  RATELIMIT_FORGOT: (username: string) => `ratelimit:forgot:${username}`,
 } as const;
 
 // ─── Trusted device & biometric ──────────────────────────────────────────────

@@ -1778,6 +1778,21 @@ a:hover { color: var(--accent-hover); }
 .security-add-button {
   margin-top: var(--space-3);
 }
+.security-add-button.is-highlighted {
+  animation: security-add-pulse 0.9s ease-out 3;
+  position: relative;
+  z-index: 1;
+}
+@keyframes security-add-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(129, 140, 248, 0.55); }
+  60%  { box-shadow: 0 0 0 12px rgba(129, 140, 248, 0); }
+  100% { box-shadow: 0 0 0 0   rgba(129, 140, 248, 0); }
+}
+[data-reduce-motion="on"] .security-add-button.is-highlighted {
+  animation: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .security-empty {
   color: var(--text-muted);
   font-size: var(--font-size-sm);

@@ -7,7 +7,7 @@ export async function checkAndIncrement(
   key: string,
   maxAttempts: number,
   windowSeconds: number,
-): Promise<{ allowed: boolean; remainingSeconds: number }> {
+): Promise<{ allowed: boolean; remainingSeconds: number; count: number; attemptsRemaining: number }> {
   const raw = await kv.get(key);
   const now = Math.floor(Date.now() / 1000);
   let state: RateLimitState;
@@ -23,7 +23,12 @@ export async function checkAndIncrement(
   }
   const remainingSeconds = Math.max(0, windowSeconds - (now - state.firstAt));
   await kv.put(key, JSON.stringify(state), { expirationTtl: Math.max(60, remainingSeconds) });
-  return { allowed: state.count <= maxAttempts, remainingSeconds };
+  return {
+    allowed: state.count <= maxAttempts,
+    remainingSeconds,
+    count: state.count,
+    attemptsRemaining: Math.max(0, maxAttempts - state.count),
+  };
 }
 
 export async function clearRateLimit(kv: KVNamespace, key: string): Promise<void> {

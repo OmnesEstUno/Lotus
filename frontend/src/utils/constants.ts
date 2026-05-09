@@ -35,6 +35,13 @@ export const STORAGE_KEYS = {
   BIOMETRIC_LOCAL_USERS: 'ft_biometric_local_users',
   ACTIVE_INSTANCE: 'ft_active_instance',
   PENDING_WORKSPACE_INVITE: 'ft_pending_workspace_invite',
+  // Set on signup completion. Read on Dashboard mount; if present, show the
+  // "enable biometrics?" onboarding modal once, then clear.
+  BIOMETRIC_PROMPT_PENDING: 'ft_biometric_prompt_pending',
+  // Session-scoped flag set when the user taps "Enable biometrics" in the
+  // onboarding modal. Read by SecurityCard on mount → triggers auto-expand,
+  // scroll-into-view, and a brief highlight pulse on the Add button.
+  SETTINGS_FOCUS_SECURITY: 'ft_settings_focus_security',
   DASHBOARD_ORDER: (instanceId: string) => `dashboard:cardOrder:${instanceId}`,
   DASHBOARD_MINIMIZED: (instanceId: string) => `dashboard:minimized:${instanceId}`,
   HIDDEN: (instanceId: string) => `dashboard:hidden:${instanceId}`,

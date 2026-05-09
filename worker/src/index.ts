@@ -19,9 +19,15 @@ import {
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
 import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential, beginAuthentication, finishAuthentication, userHasCredentials } from './auth/webauthn';
-import { rotateTrustedDevice, verifyTrustedDevice } from './auth/trustedDevice';
+import { rotateTrustedDevice, verifyTrustedDevice, revokeAllTrustedDevicesForUser } from './auth/trustedDevice';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
+import {
+  createPasswordResetToken,
+  verifyPasswordResetToken,
+  listPasswordResetTokens,
+  deletePasswordResetToken,
+} from './invites/passwordResetTokens';
 import {
   createWorkspaceInvite,
   verifyWorkspaceInvite,
@@ -39,7 +45,7 @@ import {
   deleteFromAnyYear,
   yearOfISODate,
 } from './storage/paginatedYearStorage';
-import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS, WEBAUTHN_VERIFY_MAX_ATTEMPTS, WEBAUTHN_VERIFY_LOCKOUT_SECONDS, TRUSTED_DEVICE_RATELIMIT_PER_MIN } from './constants';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, PWRESET_PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS, WEBAUTHN_VERIFY_MAX_ATTEMPTS, WEBAUTHN_VERIFY_LOCKOUT_SECONDS, TRUSTED_DEVICE_RATELIMIT_PER_MIN } from './constants';
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
@@ -76,6 +82,13 @@ interface UserProfile {
   pendingInviteId?: string;
   instanceIds?: string[];
   activeInstanceId?: string | null;
+  /**
+   * Unix seconds at which the password was last changed (or 0 if never).
+   * `authenticate()` rejects JWTs with `iat` older than this — a password reset
+   * therefore invalidates every outstanding session in addition to wiping
+   * trusted-device tokens.
+   */
+  passwordChangedAt?: number;
 }
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
@@ -128,6 +141,10 @@ async function authenticate(request: Request, env: Env): Promise<AuthContext | n
     // as freshly issued so session-age gates don't reject existing sessions
     // at rollout — the user can still re-auth via TOTP explicitly if needed.
     const iat = typeof payload.iat === 'number' ? payload.iat : Math.floor(Date.now() / 1000);
+    // Session-revocation gate: if the user's password was reset more recently
+    // than this token was issued, the token is no longer valid.
+    const profile = await getUserProfile(env.FINANCE_KV, payload.username);
+    if (profile?.passwordChangedAt && iat < profile.passwordChangedAt) return null;
     return { username: payload.username, iat };
   } catch {
     return null;
@@ -417,6 +434,36 @@ export default {
         }
       }
 
+      // ── Admin Password-Reset Token CRUD ──
+      if (path === '/api/admin/password-reset-tokens' && method === 'POST') {
+        const auth = await authenticateAdmin(request, env, cors);
+        if (auth instanceof Response) return auth;
+        const body = await request.json() as { username?: string };
+        const target = (body.username ?? '').trim().toLowerCase();
+        if (!target) return respond({ error: 'Username is required.' }, 400, cors);
+        const profile = await getUserProfile(env.FINANCE_KV, target);
+        if (!profile) return respond({ error: 'No such user.' }, 404, cors);
+        const result = await createPasswordResetToken(env.FINANCE_KV, env.JWT_SECRET, target);
+        return respond({ ...result, username: target }, 200, cors);
+      }
+
+      if (path === '/api/admin/password-reset-tokens' && method === 'GET') {
+        const auth = await authenticateAdmin(request, env, cors);
+        if (auth instanceof Response) return auth;
+        const tokens = await listPasswordResetTokens(env.FINANCE_KV, env.JWT_SECRET);
+        return respond({ tokens }, 200, cors);
+      }
+
+      {
+        const m = path.match(/^\/api\/admin\/password-reset-tokens\/([^/]+)$/);
+        if (m && method === 'DELETE') {
+          const auth = await authenticateAdmin(request, env, cors);
+          if (auth instanceof Response) return auth;
+          await deletePasswordResetToken(env.FINANCE_KV, m[1]);
+          return respond({ ok: true }, 200, cors);
+        }
+      }
+
       // ── Admin: one-time year-partition migration ──
       if (path === '/api/admin/migrate-years' && method === 'POST') {
         const authResult = await authenticateAdmin(request, env, cors);
@@ -566,12 +613,12 @@ export default {
           // Run a dummy verify to equalize response time regardless of whether
           // the username exists, preventing a timing oracle on username existence.
           await verifyPassword(body.password, await getDummyHash());
-          return respond({ error: 'Invalid credentials.' }, 401, cors);
+          return respond({ error: 'Invalid credentials.', attemptsRemaining: rl.attemptsRemaining }, 401, cors);
         }
         const profile = JSON.parse(raw) as { passwordHash: string };
 
         const valid = await verifyPassword(body.password, profile.passwordHash);
-        if (!valid) return respond({ error: 'Invalid credentials.' }, 401, cors);
+        if (!valid) return respond({ error: 'Invalid credentials.', attemptsRemaining: rl.attemptsRemaining }, 401, cors);
 
         // Clear rate-limit counter on successful password verification.
         await clearRateLimit(env.FINANCE_KV, limitKey);
@@ -773,6 +820,176 @@ export default {
         );
 
         return respond({ token: sessionJwt, trustedDeviceJwt, username }, 200, cors);
+      }
+
+      // ── Self-service password reset: step 1 (username + TOTP) ──
+      if (path === '/api/auth/forgot-begin' && method === 'POST') {
+        const body = await request.json() as { username?: string; totpCode?: string };
+        const username = (body.username ?? '').trim().toLowerCase();
+        const totpCode = (body.totpCode ?? '').trim();
+        if (!username || !totpCode) return respond({ error: 'Missing fields.' }, 400, cors);
+
+        // Rate-limit by username before any KV reads — covers both "user not found"
+        // and "wrong TOTP" so attackers can't enumerate usernames or brute-force.
+        const limitKey = KV_PREFIXES.RATELIMIT_FORGOT(username);
+        const rl = await checkAndIncrement(env.FINANCE_KV, limitKey, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS);
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${rl.remainingSeconds} second(s).` }, 429, cors);
+        }
+
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'Invalid credentials.' }, 401, cors);
+
+        const valid = await verifyTOTP(profile.totpSecret, totpCode);
+        if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
+
+        await clearRateLimit(env.FINANCE_KV, limitKey);
+
+        const pwresetId = crypto.randomUUID();
+        const now = Math.floor(Date.now() / 1000);
+        const pwresetToken = await signJWT(
+          { pwReset: true, id: pwresetId, username, stage: 'after-totp', exp: now + PWRESET_PREAUTH_TTL_SECONDS },
+          env.JWT_SECRET,
+        );
+        await env.FINANCE_KV.put(
+          KV_PREFIXES.PWRESET_PREAUTH(pwresetId),
+          JSON.stringify({ username, stage: 'after-totp' }),
+          { expirationTtl: PWRESET_PREAUTH_TTL_SECONDS },
+        );
+        const needsWebauthn = await userHasCredentials(env.FINANCE_KV, username);
+        return respond({ pwresetToken, needsWebauthn }, 200, cors);
+      }
+
+      // ── Self-service password reset: step 2a (begin WebAuthn) ──
+      if (path === '/api/auth/forgot-webauthn-begin' && method === 'POST') {
+        const body = await request.json() as { pwresetToken?: string };
+        if (!body.pwresetToken) return respond({ error: 'Missing token.' }, 400, cors);
+        let payload: Record<string, unknown>;
+        try { payload = await verifyJWT(body.pwresetToken, env.JWT_SECRET); }
+        catch { return respond({ error: 'Reset session expired. Please start over.' }, 401, cors); }
+        if (!payload.pwReset || typeof payload.id !== 'string' || typeof payload.username !== 'string' || payload.stage !== 'after-totp') {
+          return respond({ error: 'Invalid token.' }, 401, cors);
+        }
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PWRESET_PREAUTH(payload.id));
+        if (!stored) return respond({ error: 'Reset session expired. Please start over.' }, 401, cors);
+
+        const { options } = await beginAuthentication(env.FINANCE_KV, payload.username, env.RP_ID);
+        return respond({ options }, 200, cors);
+      }
+
+      // ── Self-service password reset: step 2b (finish WebAuthn) ──
+      if (path === '/api/auth/forgot-webauthn-finish' && method === 'POST') {
+        const body = await request.json() as { pwresetToken?: string; authenticationResponse?: unknown };
+        if (!body.pwresetToken || !body.authenticationResponse) return respond({ error: 'Missing fields.' }, 400, cors);
+        let payload: Record<string, unknown>;
+        try { payload = await verifyJWT(body.pwresetToken, env.JWT_SECRET); }
+        catch { return respond({ error: 'Reset session expired. Please start over.' }, 401, cors); }
+        if (!payload.pwReset || typeof payload.id !== 'string' || typeof payload.username !== 'string' || payload.stage !== 'after-totp') {
+          return respond({ error: 'Invalid token.' }, 401, cors);
+        }
+        const username = payload.username;
+        const pwresetId = payload.id;
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PWRESET_PREAUTH(pwresetId));
+        if (!stored) return respond({ error: 'Reset session expired. Please start over.' }, 401, cors);
+
+        const rl = await checkAndIncrement(
+          env.FINANCE_KV,
+          KV_PREFIXES.RATELIMIT_WEBAUTHN_VERIFY(username),
+          WEBAUTHN_VERIFY_MAX_ATTEMPTS,
+          WEBAUTHN_VERIFY_LOCKOUT_SECONDS,
+        );
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${rl.remainingSeconds} second(s).` }, 429, cors);
+        }
+
+        const result = await finishAuthentication(
+          env.FINANCE_KV,
+          username,
+          env.RP_ID,
+          env.RP_ORIGIN,
+          body.authenticationResponse as never,
+        );
+        if (!result.ok) return respond({ error: result.error }, 401, cors);
+
+        await clearRateLimit(env.FINANCE_KV, KV_PREFIXES.RATELIMIT_WEBAUTHN_VERIFY(username));
+
+        // Promote the preauth record to "after-webauthn" and reissue the JWT.
+        await env.FINANCE_KV.put(
+          KV_PREFIXES.PWRESET_PREAUTH(pwresetId),
+          JSON.stringify({ username, stage: 'after-webauthn' }),
+          { expirationTtl: PWRESET_PREAUTH_TTL_SECONDS },
+        );
+        const now = Math.floor(Date.now() / 1000);
+        const newToken = await signJWT(
+          { pwReset: true, id: pwresetId, username, stage: 'after-webauthn', exp: now + PWRESET_PREAUTH_TTL_SECONDS },
+          env.JWT_SECRET,
+        );
+        return respond({ pwresetToken: newToken }, 200, cors);
+      }
+
+      // ── Self-service password reset: step 3 (set new password) ──
+      if (path === '/api/auth/forgot-confirm' && method === 'POST') {
+        const body = await request.json() as { pwresetToken?: string; newPassword?: string };
+        if (!body.pwresetToken || !body.newPassword) return respond({ error: 'Missing fields.' }, 400, cors);
+        if (body.newPassword.length < 8) return respond({ error: 'Password must be at least 8 characters.' }, 400, cors);
+
+        let payload: Record<string, unknown>;
+        try { payload = await verifyJWT(body.pwresetToken, env.JWT_SECRET); }
+        catch { return respond({ error: 'Reset session expired. Please start over.' }, 401, cors); }
+        if (!payload.pwReset || typeof payload.id !== 'string' || typeof payload.username !== 'string') {
+          return respond({ error: 'Invalid token.' }, 401, cors);
+        }
+        const username = payload.username;
+        const pwresetId = payload.id;
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PWRESET_PREAUTH(pwresetId));
+        if (!stored) return respond({ error: 'Reset session expired. Please start over.' }, 401, cors);
+        const parsed = JSON.parse(stored) as { username: string; stage: string };
+
+        // Stage gate: if the user has any WebAuthn credentials, they must have
+        // completed the WebAuthn step. Otherwise TOTP alone is sufficient.
+        const hasCreds = await userHasCredentials(env.FINANCE_KV, username);
+        if (hasCreds && parsed.stage !== 'after-webauthn') {
+          return respond({ error: 'Additional verification required.' }, 403, cors);
+        }
+
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+
+        profile.passwordHash = await hashPassword(body.newPassword);
+        profile.passwordChangedAt = Math.floor(Date.now() / 1000);
+        await saveUserProfile(env.FINANCE_KV, username, profile);
+        await revokeAllTrustedDevicesForUser(env.FINANCE_KV, username);
+        await env.FINANCE_KV.delete(KV_PREFIXES.PWRESET_PREAUTH(pwresetId));
+        return respond({ ok: true }, 200, cors);
+      }
+
+      // ── Admin-issued reset link: redeem metadata (public) ──
+      if (path === '/api/auth/admin-reset-meta' && method === 'GET') {
+        const token = url.searchParams.get('token') ?? '';
+        if (!token) return respond({ error: 'Missing token.' }, 400, cors);
+        const v = await verifyPasswordResetToken(env.FINANCE_KV, token, env.JWT_SECRET);
+        if (!v.ok) return respond({ error: 'This reset link is invalid or has expired.' }, 401, cors);
+        return respond({ username: v.record.username, expiresAt: v.record.expiresAt }, 200, cors);
+      }
+
+      // ── Admin-issued reset link: redeem (public) ──
+      if (path === '/api/auth/admin-reset-redeem' && method === 'POST') {
+        const body = await request.json() as { token?: string; newPassword?: string };
+        if (!body.token || !body.newPassword) return respond({ error: 'Missing fields.' }, 400, cors);
+        if (body.newPassword.length < 8) return respond({ error: 'Password must be at least 8 characters.' }, 400, cors);
+
+        const v = await verifyPasswordResetToken(env.FINANCE_KV, body.token, env.JWT_SECRET);
+        if (!v.ok) return respond({ error: 'This reset link is invalid or has expired.' }, 401, cors);
+        const username = v.record.username;
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+
+        profile.passwordHash = await hashPassword(body.newPassword);
+        profile.passwordChangedAt = Math.floor(Date.now() / 1000);
+        await saveUserProfile(env.FINANCE_KV, username, profile);
+        await revokeAllTrustedDevicesForUser(env.FINANCE_KV, username);
+        await deletePasswordResetToken(env.FINANCE_KV, v.id);
+        return respond({ ok: true }, 200, cors);
       }
 
       // ─────────────────────────────────────────────────────────────────────

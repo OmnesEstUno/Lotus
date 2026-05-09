@@ -743,31 +743,44 @@ export default function Login() {
 
         {/* Login Step 2: 2FA */}
         {step === 'login-totp' && (
-          <>
-            <form onSubmit={handleVerify2FA} className="login-form">
-              <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                Enter the 6-digit code from your authenticator app.
-              </p>
-              <div className="form-group">
-                <label className="form-label" htmlFor="login-totp-code">Authentication code</label>
-                <input
-                  id="login-totp-code"
-                  name="otp"
-                  type="text"
-                  inputMode="numeric"
-                  className="input"
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="000000"
-                  autoComplete="one-time-code"
-                  style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
-                  autoFocus
-                />
-              </div>
-              <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
-                {loading ? <span className="spinner" /> : 'Verify'}
+          <form onSubmit={handleVerify2FA} className="login-form">
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              Enter the 6-digit code from your authenticator app.
+            </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="login-totp-code">Authentication code</label>
+              <input
+                id="login-totp-code"
+                name="otp"
+                type="text"
+                inputMode="numeric"
+                className="input"
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                autoComplete="one-time-code"
+                style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
+                autoFocus
+              />
+            </div>
+            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+              {loading ? <span className="spinner" /> : 'Verify'}
+            </button>
+            {hasBiometricCreds && (
+              <button
+                type="button"
+                className="btn btn-ghost w-full"
+                onClick={() => {
+                  biometricCancelledRef.current = false;
+                  setBiometricPrompted(true);
+                  setError('');
+                  void runBiometric();
+                }}
+                disabled={loading}
+              >
+                Use a passkey or biometric
               </button>
-            </form>
+            )}
             <button
               type="button"
               className="btn btn-ghost w-full"
@@ -787,7 +800,7 @@ export default function Login() {
             >
               Sign in as a different account
             </button>
-          </>
+          </form>
         )}
 
         {/* Forgot password Step 1: username + TOTP */}

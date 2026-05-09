@@ -68,10 +68,17 @@ export async function verifyBiometric(
   authenticationResponse: unknown,
   oldTrustedDeviceTokenId: string | null,
 ): Promise<VerifyBiometricResult> {
-  return request<VerifyBiometricResult>('/api/auth/verify-biometric', {
+  const result = await request<VerifyBiometricResult>('/api/auth/verify-biometric', {
     method: 'POST',
     body: JSON.stringify({ preAuthToken, authenticationResponse, oldTrustedDeviceTokenId }),
   });
+  // Self-heal: any successful WebAuthn login proves a credential exists for
+  // this user on this device/browser, so record the local-enrolled flag. This
+  // covers credentials enrolled before the local-flag mechanism was deployed
+  // and roaming/synced passkeys (1Password, iCloud Keychain) showing up on a
+  // new device for the first time.
+  markBiometricEnrolledLocally(result.username);
+  return result;
 }
 
 export interface TrustedSecondFactorResult {

@@ -7,6 +7,7 @@ import {
   renameInstance,
   deleteInstance,
   removeInstanceMember,
+  transferOwnership,
 } from '../api/instances';
 import {
   createWorkspaceInvite,
@@ -194,6 +195,19 @@ export default function WorkspacesCard() {
     });
   }
 
+  async function handleTransferOwnership(id: string, newOwner: string) {
+    if (!await dialog.confirm(`Transfer ownership to ${newOwner}? You'll keep your membership but lose owner-only controls.`)) return;
+    await runMutation({
+      onStart: () => { setBusy(true); setError(''); },
+      call: () => transferOwnership(id, newOwner),
+      onSuccess: () => refresh(),
+      onConflict: async (msg) => { setError(msg); await refresh(); },
+      onError: (msg) => setError(msg),
+      onFinally: () => setBusy(false),
+      conflictMessage: 'This workspace was modified by another session. The page has been refreshed — please try again.',
+    });
+  }
+
   return (
     <CollapsibleCard
       title="Workspaces"
@@ -262,14 +276,25 @@ export default function WorkspacesCard() {
                             )}
                           </span>
                           {isOwner && u !== inst.owner && (
-                            <button
-                              onClick={() => handleRemoveMember(inst.id, u)}
-                              className="btn btn-ghost btn-sm"
-                              disabled={busy}
-                              style={{ fontSize: '0.75rem', padding: '2px 8px', flexShrink: 0 }}
-                            >
-                              Remove
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleTransferOwnership(inst.id, u)}
+                                className="btn btn-ghost btn-sm"
+                                disabled={busy}
+                                style={{ fontSize: '0.75rem', padding: '2px 8px', flexShrink: 0 }}
+                                title={`Transfer ownership to ${u}`}
+                              >
+                                Make owner
+                              </button>
+                              <button
+                                onClick={() => handleRemoveMember(inst.id, u)}
+                                className="btn btn-ghost btn-sm"
+                                disabled={busy}
+                                style={{ fontSize: '0.75rem', padding: '2px 8px', flexShrink: 0 }}
+                              >
+                                Remove
+                              </button>
+                            </>
                           )}
                         </li>
                       ))}

@@ -82,6 +82,9 @@ export default function Login() {
   // Admin-issued reset state (deep-link path)
   const [adminResetToken, setAdminResetToken] = useState('');
   const [adminResetUsername, setAdminResetUsername] = useState('');
+  // Display name (signup field + trusted-device welcome)
+  const [displayName, setDisplayName] = useState('');
+  const [trustedDisplayName, setTrustedDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated()) {
@@ -136,11 +139,12 @@ export default function Login() {
 
     if (trustedToken) {
       trustedSecondFactor(trustedToken)
-        .then(({ preAuthToken, username, hasBiometricCreds, oldTokenId }) => {
+        .then(({ preAuthToken, username, hasBiometricCreds, oldTokenId, displayName: tdDisplayName }) => {
           setUsername(username);
           setPreAuthToken(preAuthToken);
           setHasBiometricCreds(hasBiometricCreds);
           setOldTrustedDeviceTokenId(oldTokenId);
+          setTrustedDisplayName(tdDisplayName ?? null);
           setStep('login-totp');
         })
         .catch(() => {
@@ -179,6 +183,8 @@ export default function Login() {
       storage.set(STORAGE_KEYS.TOKEN, result.token);
       storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
       storage.set(STORAGE_KEYS.USERNAME, result.username);
+      if (result.displayName) storage.set(STORAGE_KEYS.DISPLAY_NAME, result.displayName);
+      else storage.remove(STORAGE_KEYS.DISPLAY_NAME);
       notifyUsernameChange(result.username);
       const pending = sessionStore.get(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
       if (pending) {
@@ -248,7 +254,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { totpSecret: secret, setupToken: token } = await initSetup(trimmedUsername, password, inviteToken);
+      const { totpSecret: secret, setupToken: token } = await initSetup(trimmedUsername, password, inviteToken, displayName.trim() || undefined);
       setUsername(trimmedUsername);
       setTotpSecret(secret);
       setSetupToken(token);
@@ -503,11 +509,12 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Welcome message on 2FA step */}
+        {/* Welcome message on 2FA step. When the trusted-device path put us
+            here, prefer the friendly display name returned by the server. */}
         {step === 'login-totp' && username && (
           <div style={{ marginTop: 48, marginBottom: 24, textAlign: 'center' }}>
             <p style={{ color: 'var(--text-primary)', fontSize: '1.125rem', margin: 0 }}>
-              Welcome, <strong>{username}</strong>
+              Welcome, <strong>{trustedDisplayName ?? username}</strong>
             </p>
           </div>
         )}
@@ -602,6 +609,23 @@ export default function Login() {
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
                 {USERNAME_HINT}
+              </p>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="setup-display-name">Display name <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+              <input
+                id="setup-display-name"
+                name="nickname"
+                type="text"
+                className="input"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="What we'll call you"
+                autoComplete="nickname"
+                maxLength={64}
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                Shown in greetings; doesn't change how you sign in.
               </p>
             </div>
             <div className="form-group">
@@ -787,6 +811,7 @@ export default function Login() {
               onClick={() => {
                 biometricCancelledRef.current = true;
                 clearTrustedDeviceToken();
+                storage.remove(STORAGE_KEYS.DISPLAY_NAME);
                 setUsername('');
                 setPassword('');
                 setTotpCode('');
@@ -794,6 +819,7 @@ export default function Login() {
                 setHasBiometricCreds(false);
                 setOldTrustedDeviceTokenId(null);
                 setBiometricPrompted(false);
+                setTrustedDisplayName(null);
                 setError('');
                 setStep('login-password');
               }}

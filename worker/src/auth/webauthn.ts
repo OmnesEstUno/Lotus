@@ -106,6 +106,11 @@ export async function deleteCredential(
   return true;
 }
 
+export async function deleteAllCredentialsForUser(kv: KVNamespace, username: string): Promise<void> {
+  const listed = await kv.list({ prefix: KV_PREFIXES.WEBAUTHN_CREDENTIALS_PREFIX(username) });
+  await Promise.all(listed.keys.map((k) => kv.delete(k.name)));
+}
+
 export async function userHasCredentials(kv: KVNamespace, username: string): Promise<boolean> {
   const list = await kv.list({ prefix: KV_PREFIXES.WEBAUTHN_CREDENTIALS_PREFIX(username), limit: 1 });
   return list.keys.length > 0;

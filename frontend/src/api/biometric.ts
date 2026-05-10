@@ -61,6 +61,7 @@ export interface VerifyBiometricResult {
   token: string;
   trustedDeviceJwt: string;
   username: string;
+  displayName?: string;
 }
 
 export async function verifyBiometric(
@@ -86,6 +87,7 @@ export interface TrustedSecondFactorResult {
   username: string;
   hasBiometricCreds: boolean;
   oldTokenId: string;
+  displayName?: string;
 }
 
 export async function trustedSecondFactor(trustedDeviceToken: string): Promise<TrustedSecondFactorResult> {

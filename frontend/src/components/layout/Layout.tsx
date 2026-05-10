@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '../../api/auth';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
+import { useDisplayName } from '../../hooks/useDisplayName';
 import { useDataEntry } from '../../contexts/DataEntryContext';
 import Logo from '../Logo';
 import WorkspaceTabs from './WorkspaceTabs';
@@ -14,6 +15,7 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
+  const displayName = useDisplayName();
   const { open: openModal } = useDataEntry();
 
   async function handleLogout() {
@@ -37,7 +39,7 @@ export default function Layout({ children }: LayoutProps) {
             <div className="navbar-links">
               {currentUser && (
                 <span className="navbar-user">
-                  {currentUser}
+                  {displayName ?? currentUser}
                 </span>
               )}
               {onSettings ? (

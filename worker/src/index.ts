@@ -18,7 +18,7 @@ import {
   verifyTOTP,
 } from './auth/crypto';
 import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
-import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential, beginAuthentication, finishAuthentication, userHasCredentials } from './auth/webauthn';
+import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential, deleteAllCredentialsForUser, beginAuthentication, finishAuthentication, userHasCredentials } from './auth/webauthn';
 import { rotateTrustedDevice, verifyTrustedDevice, revokeAllTrustedDevicesForUser } from './auth/trustedDevice';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
 import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
@@ -45,7 +45,7 @@ import {
   deleteFromAnyYear,
   yearOfISODate,
 } from './storage/paginatedYearStorage';
-import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, PWRESET_PREAUTH_TTL_SECONDS, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS, WEBAUTHN_VERIFY_MAX_ATTEMPTS, WEBAUTHN_VERIFY_LOCKOUT_SECONDS, TRUSTED_DEVICE_RATELIMIT_PER_MIN } from './constants';
+import { JWT_TTL_SECONDS, PREAUTH_TTL_SECONDS, PWRESET_PREAUTH_TTL_SECONDS, PASSWORD_HISTORY_DEPTH, KV_PREFIXES, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS, MAX_BATCH_SIZE, MAX_BULK_IDS, BIOMETRIC_REAUTH_THRESHOLD_SECONDS, WEBAUTHN_REGISTER_MAX_ATTEMPTS, WEBAUTHN_REGISTER_LOCKOUT_SECONDS, WEBAUTHN_VERIFY_MAX_ATTEMPTS, WEBAUTHN_VERIFY_LOCKOUT_SECONDS, TRUSTED_DEVICE_RATELIMIT_PER_MIN } from './constants';
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
@@ -89,6 +89,16 @@ interface UserProfile {
    * trusted-device tokens.
    */
   passwordChangedAt?: number;
+  /**
+   * Friendly display name shown in greetings and on the trusted-device
+   * pre-fill. Optional; if absent, callers fall back to the username.
+   */
+  displayName?: string;
+  /**
+   * Hashes of recently-used passwords (most-recent first), capped at 10.
+   * Reuse is rejected by change-password and reset endpoints.
+   */
+  passwordHistory?: string[];
 }
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
@@ -197,6 +207,13 @@ async function addUsername(kv: KVNamespace, username: string): Promise<void> {
   }
 }
 
+async function removeUsername(kv: KVNamespace, username: string): Promise<void> {
+  const existing = await getUsernames(kv);
+  if (existing.includes(username)) {
+    await kv.put('meta:usernames', JSON.stringify(existing.filter((u) => u !== username)));
+  }
+}
+
 // ─── KV key scoping ───────────────────────────────────────────────────────────
 
 const userKey = (username: string, leaf: 'profile' | 'data:transactions' | 'data:income' | 'data:userCategories') =>
@@ -215,6 +232,32 @@ async function getUserProfile(kv: KVNamespace, username: string): Promise<UserPr
 
 async function saveUserProfile(kv: KVNamespace, username: string, profile: UserProfile): Promise<void> {
   await kv.put(userKey(username, 'profile'), JSON.stringify(profile));
+}
+
+/**
+ * Returns true if the candidate password matches the user's current password
+ * or any entry in their password history. Used by every endpoint that sets a
+ * new password to enforce non-reuse.
+ */
+async function isPasswordReused(profile: UserProfile, candidate: string): Promise<boolean> {
+  if (await verifyPassword(candidate, profile.passwordHash)) return true;
+  for (const oldHash of profile.passwordHistory ?? []) {
+    if (await verifyPassword(candidate, oldHash)) return true;
+  }
+  return false;
+}
+
+/**
+ * Mutates `profile` to install a new password hash, pushing the previous
+ * hash onto `passwordHistory` (most-recent first), trimmed to
+ * `PASSWORD_HISTORY_DEPTH`. Also bumps `passwordChangedAt` so existing
+ * session JWTs are invalidated.
+ */
+function applyNewPassword(profile: UserProfile, newHash: string): void {
+  const previous = profile.passwordHash;
+  profile.passwordHash = newHash;
+  profile.passwordHistory = [previous, ...(profile.passwordHistory ?? [])].slice(0, PASSWORD_HISTORY_DEPTH);
+  profile.passwordChangedAt = Math.floor(Date.now() / 1000);
 }
 
 // ─── Instance resolver middleware ─────────────────────────────────────────────
@@ -506,8 +549,9 @@ export default {
 
       // ── Initialize Setup ──
       if (path === '/api/setup/init' && method === 'POST') {
-        const body = await request.json() as { username?: string; password?: string; inviteToken?: string };
+        const body = await request.json() as { username?: string; password?: string; inviteToken?: string; displayName?: string };
         const username = (body.username ?? '').trim().toLowerCase();
+        const displayName = (body.displayName ?? '').trim().slice(0, 64) || undefined;
         if (!/^[a-z0-9_-]{3,32}$/.test(username)) {
           return respond({ error: 'Username must be 3–32 characters: lowercase letters, digits, underscore, or dash.' }, 400, cors);
         }
@@ -539,6 +583,7 @@ export default {
           createdAt: new Date().toISOString(),
           confirmed: false,
           pendingInviteId: invite.id,      // bound for confirm
+          displayName,
         };
         await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
 
@@ -631,7 +676,8 @@ export default {
 
         await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), username, { expirationTtl: PREAUTH_TTL_SECONDS });
         const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, username);
-        return respond({ preAuthToken, hasBiometricCreds }, 200, cors);
+        const fullProfile = await getUserProfile(env.FINANCE_KV, username);
+        return respond({ preAuthToken, hasBiometricCreds, displayName: fullProfile?.displayName }, 200, cors);
       }
 
       // ── Verify 2FA ──
@@ -670,7 +716,7 @@ export default {
 
         const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
         if (!raw) return respond({ error: 'User not found.' }, 401, cors);
-        const profile = JSON.parse(raw) as { totpSecret: string };
+        const profile = JSON.parse(raw) as { totpSecret: string; displayName?: string };
 
         const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
         if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
@@ -687,7 +733,7 @@ export default {
         const { token: trustedDeviceJwt } = await rotateTrustedDevice(
           env.FINANCE_KV, env.JWT_SECRET, username, body.oldTrustedDeviceTokenId ?? null,
         );
-        return respond({ token, trustedDeviceJwt, username }, 200, cors);
+        return respond({ token, trustedDeviceJwt, username, displayName: profile.displayName }, 200, cors);
       }
 
       // ── Logout ──
@@ -741,8 +787,9 @@ export default {
         );
         await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), td.username, { expirationTtl: PREAUTH_TTL_SECONDS });
         const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, td.username);
+        const tdProfile = await getUserProfile(env.FINANCE_KV, td.username);
 
-        return respond({ preAuthToken, username: td.username, hasBiometricCreds, oldTokenId: td.tokenId }, 200, cors);
+        return respond({ preAuthToken, username: td.username, hasBiometricCreds, oldTokenId: td.tokenId, displayName: tdProfile?.displayName }, 200, cors);
       }
 
       // ── Begin biometric (returns options) ──
@@ -818,8 +865,9 @@ export default {
         const { token: trustedDeviceJwt } = await rotateTrustedDevice(
           env.FINANCE_KV, env.JWT_SECRET, username, body.oldTrustedDeviceTokenId ?? null,
         );
+        const bioProfile = await getUserProfile(env.FINANCE_KV, username);
 
-        return respond({ token: sessionJwt, trustedDeviceJwt, username }, 200, cors);
+        return respond({ token: sessionJwt, trustedDeviceJwt, username, displayName: bioProfile?.displayName }, 200, cors);
       }
 
       // ── Self-service password reset: step 1 (username + TOTP) ──
@@ -955,8 +1003,11 @@ export default {
         const profile = await getUserProfile(env.FINANCE_KV, username);
         if (!profile) return respond({ error: 'User not found.' }, 404, cors);
 
-        profile.passwordHash = await hashPassword(body.newPassword);
-        profile.passwordChangedAt = Math.floor(Date.now() / 1000);
+        if (await isPasswordReused(profile, body.newPassword)) {
+          return respond({ error: 'You cannot reuse a recent password. Please choose a different one.' }, 400, cors);
+        }
+
+        applyNewPassword(profile, await hashPassword(body.newPassword));
         await saveUserProfile(env.FINANCE_KV, username, profile);
         await revokeAllTrustedDevicesForUser(env.FINANCE_KV, username);
         await env.FINANCE_KV.delete(KV_PREFIXES.PWRESET_PREAUTH(pwresetId));
@@ -984,8 +1035,11 @@ export default {
         const profile = await getUserProfile(env.FINANCE_KV, username);
         if (!profile) return respond({ error: 'User not found.' }, 404, cors);
 
-        profile.passwordHash = await hashPassword(body.newPassword);
-        profile.passwordChangedAt = Math.floor(Date.now() / 1000);
+        if (await isPasswordReused(profile, body.newPassword)) {
+          return respond({ error: 'You cannot reuse a recent password. Please choose a different one.' }, 400, cors);
+        }
+
+        applyNewPassword(profile, await hashPassword(body.newPassword));
         await saveUserProfile(env.FINANCE_KV, username, profile);
         await revokeAllTrustedDevicesForUser(env.FINANCE_KV, username);
         await deletePasswordResetToken(env.FINANCE_KV, v.id);
@@ -999,6 +1053,126 @@ export default {
       if (auth instanceof Response) return auth;
 
       const { username, iat } = auth;
+
+      // ── Account: change password ──
+      if (path === '/api/account/change-password' && method === 'POST') {
+        const body = await request.json() as { currentPassword?: string; newPassword?: string; totpCode?: string };
+        if (!body.currentPassword || !body.newPassword || !body.totpCode) {
+          return respond({ error: 'Missing fields.' }, 400, cors);
+        }
+        if (body.newPassword.length < 8) {
+          return respond({ error: 'Password must be at least 8 characters.' }, 400, cors);
+        }
+
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+
+        // Rate-limit by username so brute-forcing the current password is bounded.
+        const limitKey = KV_PREFIXES.RATELIMIT_LOGIN(username);
+        const rl = await checkAndIncrement(env.FINANCE_KV, limitKey, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS);
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${Math.ceil(rl.remainingSeconds / 60)} minute(s).` }, 429, cors);
+        }
+        if (!await verifyPassword(body.currentPassword, profile.passwordHash)) {
+          return respond({ error: 'Current password is incorrect.', attemptsRemaining: rl.attemptsRemaining }, 401, cors);
+        }
+        if (!await verifyTOTP(profile.totpSecret, body.totpCode)) {
+          return respond({ error: 'Invalid or expired code.' }, 401, cors);
+        }
+        if (await isPasswordReused(profile, body.newPassword)) {
+          return respond({ error: 'You cannot reuse a recent password. Please choose a different one.' }, 400, cors);
+        }
+        await clearRateLimit(env.FINANCE_KV, limitKey);
+
+        applyNewPassword(profile, await hashPassword(body.newPassword));
+        await saveUserProfile(env.FINANCE_KV, username, profile);
+        await revokeAllTrustedDevicesForUser(env.FINANCE_KV, username);
+        return respond({ ok: true }, 200, cors);
+      }
+
+      // ── Account: delete account ──
+      if (path === '/api/account/delete' && method === 'POST') {
+        if (username === 'admin') {
+          return respond({ error: 'The admin account cannot be deleted.' }, 403, cors);
+        }
+        const body = await request.json() as { currentPassword?: string; totpCode?: string };
+        if (!body.currentPassword || !body.totpCode) {
+          return respond({ error: 'Missing fields.' }, 400, cors);
+        }
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+
+        // Re-auth: same rate limiter as login.
+        const limitKey = KV_PREFIXES.RATELIMIT_LOGIN(username);
+        const rl = await checkAndIncrement(env.FINANCE_KV, limitKey, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS);
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${Math.ceil(rl.remainingSeconds / 60)} minute(s).` }, 429, cors);
+        }
+        if (!await verifyPassword(body.currentPassword, profile.passwordHash)) {
+          return respond({ error: 'Current password is incorrect.', attemptsRemaining: rl.attemptsRemaining }, 401, cors);
+        }
+        if (!await verifyTOTP(profile.totpSecret, body.totpCode)) {
+          return respond({ error: 'Invalid or expired code.' }, 401, cors);
+        }
+        await clearRateLimit(env.FINANCE_KV, limitKey);
+
+        // Walk every workspace this user belongs to. For workspaces they own:
+        // sole-member → delete entirely; shared → transfer ownership to the
+        // next member in order (already-validated as a real account). For
+        // workspaces they're a guest in, just remove them from the members list.
+        for (const id of profile.instanceIds ?? []) {
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
+          if (!raw) continue;
+          const inst = JSON.parse(raw) as Instance;
+          if (inst.owner === username) {
+            const others = inst.members.filter((u) => u !== username);
+            if (others.length === 0) {
+              // Sole member: delete workspace + data.
+              await Promise.all([
+                env.FINANCE_KV.delete(instanceMetaKey(id)),
+                deletePaginatedSlice(env.FINANCE_KV, instanceKey(id, 'data:transactions')),
+                deletePaginatedSlice(env.FINANCE_KV, instanceKey(id, 'data:income')),
+                env.FINANCE_KV.delete(instanceKey(id, 'data:userCategories')),
+              ]);
+            } else {
+              // Transfer ownership to first remaining member, then drop self.
+              inst.owner = others[0];
+              inst.members = others;
+              inst.version = (inst.version ?? 0) + 1;
+              await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
+              for (const memberUsername of others) {
+                // No need to touch other members' instanceIds — they were
+                // already members. Only the deleted user needs cleanup, which
+                // is moot since we're about to delete their profile.
+                void memberUsername;
+              }
+            }
+          } else {
+            // Guest membership — remove self.
+            inst.members = inst.members.filter((u) => u !== username);
+            inst.version = (inst.version ?? 0) + 1;
+            await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
+          }
+        }
+
+        // Wipe all per-user state.
+        await deleteAllCredentialsForUser(env.FINANCE_KV, username);
+        await revokeAllTrustedDevicesForUser(env.FINANCE_KV, username);
+        await env.FINANCE_KV.delete(userKey(username, 'profile'));
+        await removeUsername(env.FINANCE_KV, username);
+        return respond({ ok: true }, 200, cors);
+      }
+
+      // ── Account: change display name ──
+      if (path === '/api/account/display-name' && method === 'PUT') {
+        const body = await request.json() as { displayName?: string };
+        const next = (body.displayName ?? '').trim().slice(0, 64);
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+        profile.displayName = next || undefined;
+        await saveUserProfile(env.FINANCE_KV, username, profile);
+        return respond({ ok: true, displayName: profile.displayName ?? null }, 200, cors);
+      }
 
       // ── Biometric: register-begin ──
       if (path === '/api/auth/biometric-register-begin' && method === 'POST') {
@@ -1204,6 +1378,29 @@ export default {
             return respond({ ok: true, partialFailures }, 200, cors);
           }
           return respond({ ok: true }, 200, cors);
+        }
+
+        // Transfer ownership to another existing member (owner only)
+        if ((m = path.match(/^\/api\/instances\/([^/]+)\/transfer-owner$/)) && method === 'POST') {
+          const id = m[1];
+          const body = await request.json() as { newOwner?: string; expectedVersion?: number };
+          const newOwner = (body.newOwner ?? '').trim().toLowerCase();
+          if (!newOwner) return respond({ error: 'newOwner required.' }, 400, cors);
+          if (typeof body.expectedVersion !== 'number') return respond({ error: 'expectedVersion required.' }, 400, cors);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
+          if (!raw) return respond({ error: 'Not found.' }, 404, cors);
+          const inst = JSON.parse(raw) as Instance;
+          if (inst.owner !== username) return respond({ error: 'Only the owner can transfer ownership.' }, 403, cors);
+          if (newOwner === username) return respond({ error: 'You already own this workspace.' }, 400, cors);
+          if (!inst.members.includes(newOwner)) return respond({ error: 'New owner must already be a member.' }, 400, cors);
+          const currentVersion = inst.version ?? 0;
+          if (body.expectedVersion !== currentVersion) {
+            return respond({ error: 'Conflict: instance was modified by another request.', currentVersion }, 409, cors);
+          }
+          inst.owner = newOwner;
+          inst.version = currentVersion + 1;
+          await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
+          return respond(inst, 200, cors);
         }
 
         // Remove member (owner, or self-removal)

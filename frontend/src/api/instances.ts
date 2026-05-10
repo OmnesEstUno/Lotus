@@ -72,3 +72,18 @@ export async function removeInstanceMember(id: string, username: string): Promis
 export async function setActiveInstance(instanceId: string): Promise<void> {
   await request('/api/instances/active', { method: 'PUT', body: JSON.stringify({ instanceId }) });
 }
+
+/**
+ * Transfer ownership of a workspace to another existing member. Owner-only.
+ * Requires a fresh version (`getInstances()` first). Throws ConflictError on 409.
+ */
+export async function transferOwnership(id: string, newOwner: string): Promise<Instance> {
+  const expectedVersion = lastKnownVersion(`instance:${id}`) ?? 0;
+  const inst = await request<Instance>(
+    `/api/instances/${id}/transfer-owner`,
+    { method: 'POST', body: JSON.stringify({ newOwner, expectedVersion }) },
+  );
+  rememberVersion(`instance:${inst.id}`, inst.version ?? 0);
+  notifyInstancesChanged();
+  return inst;
+}

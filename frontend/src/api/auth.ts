@@ -29,11 +29,15 @@ export async function getSetupStatus(): Promise<{ initialized: boolean; migratio
   return request('/api/setup/status');
 }
 
-export async function initSetup(username: string, password: string, inviteToken: string): Promise<{ totpSecret: string; username: string; setupToken: string }> {
+export async function initSetup(username: string, password: string, inviteToken: string, displayName?: string): Promise<{ totpSecret: string; username: string; setupToken: string }> {
   return request('/api/setup/init', {
     method: 'POST',
-    body: JSON.stringify({ username, password, inviteToken }),
+    body: JSON.stringify({ username, password, inviteToken, displayName }),
   });
+}
+
+export function getCurrentDisplayName(): string | null {
+  return storage.get(STORAGE_KEYS.DISPLAY_NAME);
 }
 
 export async function confirmSetup(username: string, totpCode: string, setupToken: string): Promise<void> {
@@ -43,7 +47,7 @@ export async function confirmSetup(username: string, totpCode: string, setupToke
   });
 }
 
-export async function login(username: string, password: string): Promise<{ preAuthToken: string; hasBiometricCreds: boolean }> {
+export async function login(username: string, password: string): Promise<{ preAuthToken: string; hasBiometricCreds: boolean; displayName?: string }> {
   return request('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
@@ -54,6 +58,7 @@ export interface Verify2FAResult {
   token: string;
   trustedDeviceJwt: string;
   username: string;
+  displayName?: string;
 }
 
 export async function verify2FA(
@@ -68,6 +73,8 @@ export async function verify2FA(
   setToken(result.token);
   storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
   storage.set(STORAGE_KEYS.USERNAME, result.username);
+  if (result.displayName) storage.set(STORAGE_KEYS.DISPLAY_NAME, result.displayName);
+  else storage.remove(STORAGE_KEYS.DISPLAY_NAME);
   notifyUsernameChange(result.username);
   return result;
 }
@@ -103,6 +110,50 @@ export async function migrateLegacy(username: string, password: string): Promise
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
+}
+
+// ─── Account: change password / display name ────────────────────────────────
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  totpCode: string,
+): Promise<{ ok: true }> {
+  return request('/api/account/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword, totpCode }),
+  });
+}
+
+export async function deleteAccount(currentPassword: string, totpCode: string): Promise<{ ok: true }> {
+  const result = await request<{ ok: true }>('/api/account/delete', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, totpCode }),
+  });
+  // Server has revoked everything; wipe local state too.
+  clearToken();
+  storage.remove(STORAGE_KEYS.USERNAME);
+  storage.remove(STORAGE_KEYS.DISPLAY_NAME);
+  storage.remove(STORAGE_KEYS.TRUSTED_DEVICE);
+  storage.remove(STORAGE_KEYS.ACTIVE_INSTANCE);
+  storage.remove(STORAGE_KEYS.BIOMETRIC_LOCAL_USERS);
+  notifyUsernameChange(null);
+  notifyActiveInstanceChange(null);
+  return result;
+}
+
+export async function updateDisplayName(displayName: string): Promise<{ ok: true; displayName: string | null }> {
+  const result = await request<{ ok: true; displayName: string | null }>('/api/account/display-name', {
+    method: 'PUT',
+    body: JSON.stringify({ displayName }),
+  });
+  if (result.displayName) storage.set(STORAGE_KEYS.DISPLAY_NAME, result.displayName);
+  else storage.remove(STORAGE_KEYS.DISPLAY_NAME);
+  // Tell same-tab subscribers (e.g. layout greeting) so the new name renders
+  // without a reload. Subscribing keys off username; refire the current value.
+  const u = getCurrentUsername();
+  if (u) notifyUsernameChange(u);
+  return result;
 }
 
 // ─── Forgot password (self-service) ──────────────────────────────────────────

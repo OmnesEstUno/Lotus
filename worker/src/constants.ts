@@ -4,6 +4,7 @@ export const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const WORKSPACE_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const PASSWORD_RESET_TOKEN_TTL_SECONDS = 24 * 60 * 60;       // 24 hours, admin-issued reset link
 export const PWRESET_PREAUTH_TTL_SECONDS = 600;                     // 10 minutes, between TOTP and WebAuthn during self-reset
+export const PASSWORD_HISTORY_DEPTH = 10;                            // reject reuse of the last N passwords
 
 export const MAX_BATCH_SIZE = 1000;       // for bulk POST/PUT/DELETE
 export const MAX_BULK_IDS = 10_000;

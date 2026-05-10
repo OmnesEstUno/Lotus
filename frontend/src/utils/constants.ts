@@ -27,6 +27,7 @@ export const STORAGE_KEYS = {
   TOKEN: 'ft_token',
   TRUSTED_DEVICE: 'ft_trusted_device',
   USERNAME: 'ft_username',
+  DISPLAY_NAME: 'ft_display_name',
   // JSON array of usernames who have enrolled a biometric credential
   // *on this device*. Server's `hasBiometricCreds` flag tells us whether
   // ANY device has one; this localStorage hint tells us whether THIS one

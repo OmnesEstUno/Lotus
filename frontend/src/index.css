@@ -1801,6 +1801,12 @@ a:hover { color: var(--accent-hover); }
 }
 
 /* ─── CollapsibleCard variant: card (refined hover + focus) ─────────────── */
+/* The transition lives on the base selector so the lift fades in AND out
+   smoothly. The :has() rule below changes the styles; the transition
+   defined here animates BOTH the entry and the exit. */
+.collapsible-card--card {
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
 /* Hover-only-when-collapsed: applies to the clickable header, not the
    expanded body, so an open card doesn't pulse under the cursor. The
    :has() selector targets the outer .card when its inner toggle button
@@ -1808,15 +1814,11 @@ a:hover { color: var(--accent-hover); }
 .collapsible-card--card:has(.collapsible-card-toggle[aria-expanded="false"]:hover) {
   background: var(--bg-elevated);
   border-color: var(--accent);
-  transition: background 150ms ease-out, border-color 150ms ease-out;
 }
 .collapsible-card--card .collapsible-card-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
-}
-[data-reduce-motion="on"] .collapsible-card--card {
-  transition: none;
 }
 
 /* ─── Security card: biometric devices list ──────────────────────────────── */

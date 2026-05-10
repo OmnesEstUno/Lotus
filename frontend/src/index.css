@@ -1764,6 +1764,42 @@ a:hover { color: var(--accent-hover); }
   transition: none;
 }
 
+/* ─── CollapsibleCard variant: group ─────────────────────────────────────── */
+.collapsible-card--group {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-5);
+}
+.collapsible-card--group .collapsible-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.collapsible-card--group .collapsible-card-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+.collapsible-card--group .collapsible-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+.collapsible-card--group .collapsible-card-body-inner {
+  /* Group bodies stack their inner sub-cards with a 12px gap. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+}
+
 /* ─── Security card: biometric devices list ──────────────────────────────── */
 .security-credential-row {
   display: flex;

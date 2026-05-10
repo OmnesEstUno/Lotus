@@ -1739,12 +1739,29 @@ a:hover { color: var(--accent-hover); }
   flex-shrink: 0;
   font-size: 24px;
   color: var(--text-muted);
+  transition: transform 200ms ease-out;
+}
+.collapsible-card-toggle[aria-expanded="true"] .collapsible-card-chevron {
+  transform: rotate(180deg);
 }
 .collapsible-card-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease-out;
   margin-top: var(--space-4);
 }
-.collapsible-card-body[hidden] {
-  display: none;
+.collapsible-card-body[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.collapsible-card-body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Reduce-motion: snap, don't glide. */
+[data-reduce-motion="on"] .collapsible-card-body,
+[data-reduce-motion="on"] .collapsible-card-chevron {
+  transition: none;
 }
 
 /* ─── Security card: biometric devices list ──────────────────────────────── */

@@ -109,11 +109,6 @@ export default function DangerZone({ transactions, income, userCategories, onPur
       variant="group"
       iconName="warning"
       tone="danger"
-      titleStyle={{ color: 'var(--danger)' }}
-      cardStyle={{
-        borderColor: 'rgba(248,113,113,0.35)',
-        background: 'rgba(248,113,113,0.03)',
-      }}
     >
       {success && (
         <div className="alert alert-success" style={{ marginBottom: 16 }}>

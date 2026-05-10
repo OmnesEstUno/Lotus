@@ -1747,11 +1747,16 @@ a:hover { color: var(--accent-hover); }
 .collapsible-card-body {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 200ms ease-out;
-  margin-top: var(--space-4);
+  /* margin-top is conditional on data-open below — without that, a 16px
+     margin would leak into the collapsed state (margin is NOT clipped by
+     overflow:hidden) and the header would visually hug the top of the
+     card with empty space below it. */
+  margin-top: 0;
+  transition: grid-template-rows 200ms ease-out, margin-top 200ms ease-out;
 }
 .collapsible-card-body[data-open="true"] {
   grid-template-rows: 1fr;
+  margin-top: var(--space-4);
 }
 .collapsible-card-body-inner {
   overflow: hidden;
@@ -1804,11 +1809,13 @@ a:hover { color: var(--accent-hover); }
   width: 100%;
 }
 .collapsible-card--group .collapsible-card-body-inner {
-  /* Group bodies stack their inner sub-cards with a 12px gap. */
+  /* Group bodies stack their inner sub-cards with a 12px gap.
+     The header-to-body gap is provided by .collapsible-card-body's
+     conditional margin-top above, so no padding-top here (avoids
+     doubling the gap when expanded). */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding-top: var(--space-4);
 }
 
 /* ─── CollapsibleCard variant: card (refined hover + focus) ─────────────── */

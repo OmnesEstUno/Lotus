@@ -6,11 +6,19 @@ import type { InviteSummary } from '../api/invites';
 import { UNIX_MS_MULTIPLIER } from '../utils/constants';
 import { dialog } from '../utils/dialog';
 
+// Build the full invite deep-link URL.
+function buildInviteLink(token: string): string {
+  return `${window.location.origin}${window.location.pathname}#/signup?token=${encodeURIComponent(token)}`;
+}
+
+// Check if the Web Share API is available.
+const SHARE_SUPPORTED = typeof navigator !== 'undefined' && 'share' in navigator;
+
 // Pre-compute QR data URLs for all active invites (eager, ~fast).
 async function buildQrMap(invites: InviteSummary[]): Promise<Map<string, string>> {
   const entries = await Promise.all(
     invites.map(async (inv) => {
-      const url = `${window.location.origin}${window.location.pathname}#/signup?token=${encodeURIComponent(inv.token)}`;
+      const url = buildInviteLink(inv.token);
       const dataUrl = await QRCode.toDataURL(url, { width: 256, margin: 1 });
       return [inv.id, dataUrl] as const;
     }),
@@ -40,6 +48,29 @@ export default function InviteTokensCard() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  async function handleCopyLink(id: string, link: string) {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      /* clipboard blocked; user can still copy from the visible link block */
+    }
+  }
+
+  async function handleShare(link: string) {
+    try {
+      await navigator.share({
+        title: 'Lotus invite',
+        text: 'Set up your Lotus account',
+        url: link,
+      });
+    } catch {
+      /* user cancellation throws AbortError; silently swallow */
+    }
+  }
 
   async function refresh(autoExpandId?: string) {
     try {
@@ -135,44 +166,63 @@ export default function InviteTokensCard() {
               </button>
 
               {/* Expanded body */}
-              {isExpanded && (
-                <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {qrDataUrl && (
-                    <div style={{ display: 'flex', justifyContent: 'center' }}>
-                      <img src={qrDataUrl} alt="Invite QR code" style={{ borderRadius: 8 }} />
+              {isExpanded && (() => {
+                const link = buildInviteLink(inv.token);
+                return (
+                  <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {qrDataUrl && (
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <img src={qrDataUrl} alt="Invite QR code" style={{ borderRadius: 8 }} />
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        background: 'var(--bg-elevated)',
+                        borderRadius: 8,
+                        padding: '10px 14px',
+                        fontFamily: 'monospace',
+                        fontSize: '0.8rem',
+                        wordBreak: 'break-all',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      {link}
                     </div>
-                  )}
-                  <div
-                    style={{
-                      background: 'var(--bg-elevated)',
-                      borderRadius: 8,
-                      padding: '10px 14px',
-                      fontFamily: 'monospace',
-                      fontSize: '0.8rem',
-                      wordBreak: 'break-all',
-                      color: 'var(--text-secondary)',
-                    }}
-                  >
-                    {inv.token}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleCopyLink(inv.id, link)}
+                      >
+                        {copiedId === inv.id ? 'Copied' : 'Copy link'}
+                      </button>
+                      {SHARE_SUPPORTED && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleShare(link)}
+                        >
+                          Share
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => navigator.clipboard.writeText(inv.token)}
+                      >
+                        Copy token
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleRevoke(inv.id)}
+                      >
+                        Revoke
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => navigator.clipboard.writeText(inv.token)}
-                    >
-                      Copy token
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleRevoke(inv.id)}
-                    >
-                      Revoke
-                    </button>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </li>
           );
         })}

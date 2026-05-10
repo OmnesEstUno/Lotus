@@ -25,6 +25,7 @@ import { CSS } from '@dnd-kit/utilities';
 import CollapsibleCard from '../components/CollapsibleCard';
 import InviteTokensCard from '../components/InviteTokensCard';
 import PasswordResetTokensCard from '../components/PasswordResetTokensCard';
+import AccountCard from '../components/AccountCard';
 import ToggleSwitch from '../components/ToggleSwitch';
 import WorkspacesCard from '../components/WorkspacesCard';
 import AccessibilityCard from '../components/AccessibilityCard';
@@ -258,14 +259,21 @@ export default function Settings() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-      {/* ─── Admin: Invite Tokens ─────────────────────────── */}
-      {currentUser === 'admin' && <InviteTokensCard />}
+      {/* ═══ ACCOUNT ═════════════════════════════════════════ */}
+      <CollapsibleCard title="Account" variant="group" iconName="person">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <AccountCard />
+          <SecurityCard />
+          <AccessibilityCard />
+          {currentUser !== 'admin' && <FeatureRequestCard />}
+        </div>
+      </CollapsibleCard>
 
-      {/* ─── Admin: Password reset links ──────────────────── */}
-      {currentUser === 'admin' && <PasswordResetTokensCard />}
-
-      {/* ─── Workspaces ───────────────────────────────────── */}
-      <WorkspacesCard />
+      {/* ═══ WORKSPACES & DATA ═══════════════════════════════ */}
+      <CollapsibleCard title="Workspaces & Data" variant="group" iconName="workspaces">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <WorkspacesCard />
+          <ArchivedCard />
 
       {/* ─── Dashboard Card Visibility ────────────────────── */}
       <CollapsibleCard
@@ -440,20 +448,21 @@ export default function Settings() {
         )}
       </CollapsibleCard>
 
-      {/* ─── Feature Request ──────────────────────────────── */}
-      <FeatureRequestCard />
-      {currentUser === 'admin' && <FeatureRequestsAdminCard />}
+        </div>
+      </CollapsibleCard>
 
-      {/* ─── Archived Transactions ────────────────────────── */}
-      <ArchivedCard />
+      {/* ═══ ADMIN ═══════════════════════════════════════════ */}
+      {currentUser === 'admin' && (
+        <CollapsibleCard title="Admin" variant="group" iconName="shield_person">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <InviteTokensCard />
+            <PasswordResetTokensCard />
+            <FeatureRequestsAdminCard />
+          </div>
+        </CollapsibleCard>
+      )}
 
-      {/* ─── Security ─────────────────────────────────────── */}
-      <SecurityCard />
-
-      {/* ─── Accessibility ────────────────────────────────── */}
-      <AccessibilityCard />
-
-      {/* ─── Danger Zone ──────────────────────────────────── */}
+      {/* ═══ DANGER ZONE ═════════════════════════════════════ */}
       <DangerZone
         transactions={transactions}
         income={income}

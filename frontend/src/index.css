@@ -1821,6 +1821,15 @@ a:hover { color: var(--accent-hover); }
   border-radius: var(--radius-sm);
 }
 
+/* ─── CollapsibleCard tone: danger ───────────────────────────────────────── */
+.collapsible-card--tone-danger {
+  border-color: rgba(248, 113, 113, 0.3);
+}
+.collapsible-card--tone-danger .collapsible-card-icon {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 /* ─── Security card: biometric devices list ──────────────────────────────── */
 .security-credential-row {
   display: flex;

@@ -1764,6 +1764,12 @@ a:hover { color: var(--accent-hover); }
   transition: none;
 }
 
+/* Whole card is clickable when collapsed (component wires the onClick).
+   The cursor hint makes the affordance discoverable. */
+.collapsible-card:has(.collapsible-card-toggle[aria-expanded="false"]) {
+  cursor: pointer;
+}
+
 /* ─── CollapsibleCard variant: group ─────────────────────────────────────── */
 .collapsible-card--group {
   background: var(--bg-surface);
@@ -1774,17 +1780,22 @@ a:hover { color: var(--accent-hover); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 80px;
+  height: 80px;
   border-radius: var(--radius-md);
   background: var(--accent-dim);
   color: var(--accent);
-  font-size: 22px;
+  font-size: 44px;
+  line-height: 1;
   flex-shrink: 0;
 }
 .collapsible-card--group .collapsible-card-title {
   font-size: 17px;
   font-weight: 700;
+  /* Override the inherited body line-height so the title's line box matches
+     its visual cap-height — without this, the line box's vertical center
+     drifts above the chip's center and the title appears top-heavy. */
+  line-height: 1;
 }
 .collapsible-card--group .collapsible-card-toggle {
   display: flex;

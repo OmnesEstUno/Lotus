@@ -65,14 +65,20 @@ export default function CollapsibleCard({
   const toneClass = tone !== 'default' ? `collapsible-card--tone-${tone}` : '';
   const className = ['card', 'collapsible-card', variantClass, toneClass].filter(Boolean).join(' ');
 
+  // When collapsed, the entire card wrapper acts as a click target so users
+  // don't have to aim for the header. The inner button still owns toggle for
+  // keyboard users; we stopPropagation there so a click on the button doesn't
+  // double-fire (button toggle → bubbles to outer → outer toggle → no-op).
+  const handleOuterClick = !open ? toggle : undefined;
+
   return (
-    <div className={className} style={cardStyle}>
+    <div className={className} style={cardStyle} onClick={handleOuterClick}>
       <div className="collapsible-card-header">
         <button
           type="button"
           className="collapsible-card-toggle"
           aria-expanded={open}
-          onClick={toggle}
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
         >
           {variant === 'group' && iconName && (
             <span className="material-symbols-outlined collapsible-card-icon" aria-hidden="true">

@@ -1605,17 +1605,26 @@ a:hover { color: var(--accent-hover); }
   align-items: center;
 }
 @media (max-width: 639px) {
+  /* Three-row grid that flows top-to-bottom then right, with horizontal
+     overflow scrolling on the row as a whole. Each column auto-sizes to
+     its widest chip. */
   .category-chip-row-chips {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    column-gap: 12px;
+    row-gap: 8px;
     overflow-x: auto;
-    /* Allow horizontal swipe to scroll without hijacking page vertical scroll. */
     touch-action: pan-x;
-    /* Slim scrollbar; the existing scrollbar styles already handle this. */
     padding-bottom: 4px;
     -webkit-overflow-scrolling: touch;
   }
+  /* Each chip occupies exactly one grid cell; min-width: 0 lets long
+     labels (e.g. "Subscriptions & Utilities: $1,234.56") truncate
+     within the cell instead of forcing the column wider. */
   .category-chip-row-chips > * {
-    flex-shrink: 0;
+    min-width: 0;
   }
 }
 

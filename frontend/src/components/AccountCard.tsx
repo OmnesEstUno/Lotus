@@ -1,8 +1,8 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import CollapsibleCard from './CollapsibleCard';
 import PasswordInput from './PasswordInput';
 import RateLimitMessage from './RateLimitMessage';
-import { changePassword, updateDisplayName, getCurrentDisplayName } from '../api/auth';
+import { changePassword, updateDisplayName, getCurrentDisplayName, getAccountTotpStatus } from '../api/auth';
 import { PASSWORD_MIN_LENGTH } from '../utils/constants';
 
 export default function AccountCard() {
@@ -18,6 +18,16 @@ export default function AccountCard() {
   const [totpCode, setTotpCode] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
   const [pwMessage, setPwMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const [hasTotp, setHasTotp] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAccountTotpStatus()
+      .then(({ enrolled }) => { if (!cancelled) setHasTotp(enrolled); })
+      .catch(() => { if (!cancelled) setHasTotp(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleSaveName(e: FormEvent) {
     e.preventDefault();
@@ -45,13 +55,13 @@ export default function AccountCard() {
       setPwMessage({ kind: 'err', text: 'New passwords do not match.' });
       return;
     }
-    if (totpCode.length !== 6) {
+    if (hasTotp && totpCode.length !== 6) {
       setPwMessage({ kind: 'err', text: 'Enter the 6-digit code from your authenticator app.' });
       return;
     }
     setSavingPassword(true);
     try {
-      await changePassword(currentPassword, newPassword, totpCode);
+      await changePassword(currentPassword, newPassword, hasTotp ? totpCode : '');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -140,21 +150,23 @@ export default function AccountCard() {
             maxLength={256}
           />
         </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label className="form-label" htmlFor="account-totp">Authenticator code</label>
-          <input
-            id="account-totp"
-            name="otp"
-            type="text"
-            inputMode="numeric"
-            className="input"
-            value={totpCode}
-            onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="000000"
-            autoComplete="one-time-code"
-            style={{ textAlign: 'center', letterSpacing: '0.25em', width: '100%' }}
-          />
-        </div>
+        {hasTotp && (
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" htmlFor="account-totp">Authenticator code</label>
+            <input
+              id="account-totp"
+              name="otp"
+              type="text"
+              inputMode="numeric"
+              className="input"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              autoComplete="one-time-code"
+              style={{ textAlign: 'center', letterSpacing: '0.25em', width: '100%' }}
+            />
+          </div>
+        )}
         <button type="submit" className="btn btn-primary" disabled={savingPassword} style={{ alignSelf: 'flex-start' }}>
           {savingPassword ? <span className="spinner" /> : 'Change password'}
         </button>

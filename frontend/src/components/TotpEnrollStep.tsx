@@ -104,11 +104,11 @@ export default function TotpEnrollStep({ otpauthUrl, secret, onContinue }: Props
           }}
         >
           <p style={{ margin: 0 }}>
-            Authy — free, works on any device:
+            Tap "Open in authenticator app" above to pick from any TOTP app already on your device. No app yet? Install Google Authenticator:
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
             <a
-              href="https://apps.apple.com/app/twilio-authy/id494168017"
+              href="https://apps.apple.com/app/google-authenticator/id388497605"
               target="_blank"
               rel="noopener noreferrer"
               style={{ color: 'var(--accent)' }}
@@ -116,12 +116,20 @@ export default function TotpEnrollStep({ otpauthUrl, secret, onContinue }: Props
               App Store
             </a>
             <a
-              href="https://play.google.com/store/apps/details?id=com.authy.authy"
+              href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2"
               target="_blank"
               rel="noopener noreferrer"
               style={{ color: 'var(--accent)' }}
             >
               Play Store
+            </a>
+            <a
+              href="https://safety.google/authentication/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--accent)' }}
+            >
+              About
             </a>
           </div>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>

@@ -586,68 +586,25 @@ export default {
         if (existing.includes(username)) return respond({ error: 'Username already exists.' }, 400, cors);
 
         const passwordHash = await hashPassword(body.password);
-        const totpSecret = generateTOTPSecret();
-        const profile = {
-          passwordHash,
-          totpSecret,
-          createdAt: new Date().toISOString(),
-          confirmed: false,
-          pendingInviteId: invite.id,      // bound for confirm
-          displayName,
-        };
-        await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
-
-        const setupTokenId = crypto.randomUUID();
-        await env.FINANCE_KV.put(
-          `setup-token:${setupTokenId}`,
-          JSON.stringify({ username, inviteId: invite.id }),
-          { expirationTtl: 90 },
-        );
-        return respond({ totpSecret, username, setupToken: setupTokenId }, 200, cors);
-      }
-
-      // ── Confirm TOTP Setup ──
-      if (path === '/api/setup/confirm' && method === 'POST') {
-        const body = await request.json() as { username?: string; totpCode?: string; setupToken?: string };
-        const { setupToken } = body;
-        if (!setupToken || typeof setupToken !== 'string') {
-          return respond({ error: 'Missing setup token.' }, 400, cors);
-        }
-        const tokRaw = await env.FINANCE_KV.get(`setup-token:${setupToken}`);
-        if (!tokRaw) return respond({ error: 'Setup token expired. Please retry from invite link.' }, 400, cors);
-        const tok = JSON.parse(tokRaw) as { username: string; inviteId: string };
-        const username = (body.username ?? '').trim().toLowerCase();
-        if (tok.username !== username) {
-          return respond({ error: 'Token does not match username.' }, 400, cors);
-        }
-        const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
-        if (!raw) return respond({ error: 'Setup not started for this user.' }, 400, cors);
-        const profile = JSON.parse(raw) as { totpSecret: string; confirmed: boolean };
-        if (!body.totpCode) return respond({ error: 'Missing TOTP code.' }, 400, cors);
-
-        const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
-        if (!valid) return respond({ error: 'Invalid code.' }, 400, cors);
-
-        profile.confirmed = true;
-
-        if ((profile as { pendingInviteId?: string }).pendingInviteId) {
-          const inviteId = (profile as { pendingInviteId?: string }).pendingInviteId!;
-          const marked = await markInviteUsed(env.FINANCE_KV, inviteId, username);
-          if (!marked) console.warn(`Invite ${inviteId} could not be marked used for ${username} (expired or revoked).`);
-          const p = profile as { pendingInviteId?: string };
-          delete p.pendingInviteId;
-        }
-
         const defaultInstance = await createDefaultInstance(env.FINANCE_KV, username);
-        (profile as UserProfile).instanceIds = [defaultInstance.id];
-        (profile as UserProfile).activeInstanceId = defaultInstance.id;
+        const profile: UserProfile = {
+          passwordHash,
+          // totpSecret omitted — the user can enrol later from the Security card.
+          createdAt: new Date().toISOString(),
+          confirmed: true,
+          displayName,
+          instanceIds: [defaultInstance.id],
+          activeInstanceId: defaultInstance.id,
+        };
+        await saveUserProfile(env.FINANCE_KV, username, profile);
 
-        await env.FINANCE_KV.put(userKey(username, 'profile'), JSON.stringify(profile));
+        const marked = await markInviteUsed(env.FINANCE_KV, invite.id, username);
+        if (!marked) console.warn(`Invite ${invite.id} could not be marked used for ${username} (expired or revoked).`);
+
         await addUsername(env.FINANCE_KV, username);
         await env.FINANCE_KV.put('meta:initialized', 'true');
 
-        await env.FINANCE_KV.delete(`setup-token:${setupToken}`);
-        return respond({ ok: true }, 200, cors);
+        return respond({ ok: true, username }, 200, cors);
       }
 
       // ── Login ──

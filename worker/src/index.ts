@@ -76,7 +76,12 @@ interface Instance {
 
 interface UserProfile {
   passwordHash: string;
-  totpSecret: string;
+  /**
+   * Base32 TOTP shared secret. Absent (or empty string) means the user has
+   * not enrolled an authenticator app. Treat `Boolean(profile.totpSecret)`
+   * as the single source of truth for "TOTP enrolled."
+   */
+  totpSecret?: string;
   createdAt: string;
   confirmed: boolean;
   pendingInviteId?: string;
@@ -232,6 +237,11 @@ async function getUserProfile(kv: KVNamespace, username: string): Promise<UserPr
 
 async function saveUserProfile(kv: KVNamespace, username: string, profile: UserProfile): Promise<void> {
   await kv.put(userKey(username, 'profile'), JSON.stringify(profile));
+}
+
+/** True when the user has an authenticator-app secret on file. */
+function hasTotpEnrolled(profile: UserProfile): boolean {
+  return !!profile.totpSecret && profile.totpSecret.length > 0;
 }
 
 /**

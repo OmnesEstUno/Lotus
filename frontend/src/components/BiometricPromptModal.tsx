@@ -58,6 +58,12 @@ export default function BiometricPromptModal() {
           Sign in faster next time with your fingerprint or face. You can always
           add or remove devices later from Settings.
         </p>
+        <p style={{ margin: 0, textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          <strong style={{ color: 'var(--text-primary)' }}>Also recommended:</strong>{' '}
+          enrol an authenticator app (TOTP) for enhanced backup security and
+          account protection. You can set this up from the Security card
+          whenever you're ready.
+        </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           <button className="btn btn-primary btn-lg w-full" onClick={handleEnable}>
             Enable biometrics

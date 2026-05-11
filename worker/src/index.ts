@@ -703,6 +703,48 @@ export default {
         return respond({ token, trustedDeviceJwt, username, displayName: profile.displayName }, 200, cors);
       }
 
+      // ── Complete login with no second factor (no TOTP & no biometric) ──
+      if (path === '/api/auth/complete-login' && method === 'POST') {
+        const body = await request.json() as {
+          preAuthToken?: string;
+          oldTrustedDeviceTokenId?: string | null;
+        };
+        if (!body.preAuthToken) return respond({ error: 'Missing token.' }, 400, cors);
+
+        let payload: Record<string, unknown>;
+        try { payload = await verifyJWT(body.preAuthToken, env.JWT_SECRET); }
+        catch { return respond({ error: 'Session expired. Please log in again.' }, 401, cors); }
+
+        if (!payload.preAuth || typeof payload.id !== 'string' || typeof payload.username !== 'string') {
+          return respond({ error: 'Invalid token.' }, 401, cors);
+        }
+        const username = payload.username;
+        const preAuthId = payload.id;
+        const stored = await env.FINANCE_KV.get(KV_PREFIXES.PREAUTH(preAuthId));
+        if (stored !== username) return respond({ error: 'Session expired.' }, 401, cors);
+
+        // Gate: only allowed if user has NO second factor enrolled.
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 401, cors);
+        const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, username);
+        if (hasTotpEnrolled(profile) || hasBiometricCreds) {
+          return respond({ error: 'Second factor required.' }, 403, cors);
+        }
+
+        // One-shot: burn the pre-auth token so it can't be replayed.
+        await env.FINANCE_KV.delete(KV_PREFIXES.PREAUTH(preAuthId));
+
+        const now = Math.floor(Date.now() / 1000);
+        const token = await signJWT(
+          { authenticated: true, username, iat: now, exp: now + JWT_TTL_SECONDS },
+          env.JWT_SECRET,
+        );
+        const { token: trustedDeviceJwt } = await rotateTrustedDevice(
+          env.FINANCE_KV, env.JWT_SECRET, username, body.oldTrustedDeviceTokenId ?? null,
+        );
+        return respond({ token, trustedDeviceJwt, username, displayName: profile.displayName }, 200, cors);
+      }
+
       // ── Logout ──
       if (path === '/api/auth/logout' && method === 'POST') {
         return respond({ ok: true }, 200, cors);

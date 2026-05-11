@@ -643,7 +643,8 @@ export default {
         await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), username, { expirationTtl: PREAUTH_TTL_SECONDS });
         const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, username);
         const fullProfile = await getUserProfile(env.FINANCE_KV, username);
-        return respond({ preAuthToken, hasBiometricCreds, displayName: fullProfile?.displayName }, 200, cors);
+        const hasTotp = !!fullProfile && hasTotpEnrolled(fullProfile);
+        return respond({ preAuthToken, hasBiometricCreds, hasTotp, displayName: fullProfile?.displayName }, 200, cors);
       }
 
       // ── Verify 2FA ──
@@ -754,8 +755,9 @@ export default {
         await env.FINANCE_KV.put(KV_PREFIXES.PREAUTH(preAuthId), td.username, { expirationTtl: PREAUTH_TTL_SECONDS });
         const hasBiometricCreds = await userHasCredentials(env.FINANCE_KV, td.username);
         const tdProfile = await getUserProfile(env.FINANCE_KV, td.username);
+        const hasTotp = !!tdProfile && hasTotpEnrolled(tdProfile);
 
-        return respond({ preAuthToken, username: td.username, hasBiometricCreds, oldTokenId: td.tokenId, displayName: tdProfile?.displayName }, 200, cors);
+        return respond({ preAuthToken, username: td.username, hasBiometricCreds, hasTotp, oldTokenId: td.tokenId, displayName: tdProfile?.displayName }, 200, cors);
       }
 
       // ── Begin biometric (returns options) ──

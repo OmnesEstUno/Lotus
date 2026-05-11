@@ -1205,6 +1205,92 @@ export default {
         return respond({ ok: true, displayName: profile.displayName ?? null }, 200, cors);
       }
 
+      // ── Account: TOTP enrollment status ──
+      if (path === '/api/account/totp/status' && method === 'GET') {
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+        return respond({ enrolled: hasTotpEnrolled(profile) }, 200, cors);
+      }
+
+      // ── Account: TOTP — begin enrollment ──
+      if (path === '/api/account/totp/init' && method === 'POST') {
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+        if (hasTotpEnrolled(profile)) {
+          return respond({ error: 'TOTP is already enrolled. Remove the current authenticator before adding a new one.' }, 400, cors);
+        }
+        const totpSecret = generateTOTPSecret();
+        const setupTokenId = crypto.randomUUID();
+        await env.FINANCE_KV.put(
+          `account-totp-setup:${setupTokenId}`,
+          JSON.stringify({ username, secret: totpSecret }),
+          { expirationTtl: 600 },
+        );
+        const otpauthUrl = `otpauth://totp/Lotus:${encodeURIComponent(username)}?secret=${totpSecret}&issuer=Lotus&algorithm=SHA1&digits=6&period=30`;
+        return respond({ totpSecret, otpauthUrl, setupToken: setupTokenId }, 200, cors);
+      }
+
+      // ── Account: TOTP — confirm enrollment ──
+      if (path === '/api/account/totp/confirm' && method === 'POST') {
+        const body = await request.json() as { setupToken?: string; totpCode?: string };
+        if (!body.setupToken || !body.totpCode) {
+          return respond({ error: 'Missing fields.' }, 400, cors);
+        }
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+        if (hasTotpEnrolled(profile)) {
+          return respond({ error: 'TOTP is already enrolled.' }, 400, cors);
+        }
+        const stashRaw = await env.FINANCE_KV.get(`account-totp-setup:${body.setupToken}`);
+        if (!stashRaw) {
+          return respond({ error: 'Setup session expired. Please start over.' }, 400, cors);
+        }
+        const stash = JSON.parse(stashRaw) as { username: string; secret: string };
+        if (stash.username !== username) {
+          return respond({ error: 'Setup token does not match this user.' }, 400, cors);
+        }
+        // Rate-limit by setup token to bound brute-forcing the 6-digit code.
+        const limitKey = `ratelimit:totp-enroll:${body.setupToken}`;
+        const rl = await checkAndIncrement(env.FINANCE_KV, limitKey, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS);
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${rl.remainingSeconds} second(s).` }, 429, cors);
+        }
+        const valid = await verifyTOTP(stash.secret, body.totpCode);
+        if (!valid) return respond({ error: 'Invalid code.' }, 400, cors);
+        await clearRateLimit(env.FINANCE_KV, limitKey);
+
+        profile.totpSecret = stash.secret;
+        await saveUserProfile(env.FINANCE_KV, username, profile);
+        await env.FINANCE_KV.delete(`account-totp-setup:${body.setupToken}`);
+        return respond({ ok: true }, 200, cors);
+      }
+
+      // ── Account: TOTP — remove ──
+      if (path === '/api/account/totp' && method === 'DELETE') {
+        const body = await request.json().catch(() => ({})) as { totpCode?: string };
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+        if (!hasTotpEnrolled(profile)) {
+          return respond({ error: 'TOTP is not enrolled for this account.' }, 400, cors);
+        }
+        if (!body.totpCode) {
+          return respond({ error: 'Enter a current 6-digit code to confirm removal.' }, 400, cors);
+        }
+        // Reuse the per-preauth limiter key but scoped to "totp-remove:<username>".
+        const limitKey = `ratelimit:totp-remove:${username}`;
+        const rl = await checkAndIncrement(env.FINANCE_KV, limitKey, TOTP_MAX_ATTEMPTS, TOTP_LOCKOUT_SECONDS);
+        if (!rl.allowed) {
+          return respond({ error: `Too many attempts. Try again in ${rl.remainingSeconds} second(s).` }, 429, cors);
+        }
+        const valid = await verifyTOTP(profile.totpSecret!, body.totpCode);
+        if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
+        await clearRateLimit(env.FINANCE_KV, limitKey);
+
+        delete profile.totpSecret;
+        await saveUserProfile(env.FINANCE_KV, username, profile);
+        return respond({ ok: true }, 200, cors);
+      }
+
       // ── Biometric: register-begin ──
       if (path === '/api/auth/biometric-register-begin' && method === 'POST') {
         const now = Math.floor(Date.now() / 1000);

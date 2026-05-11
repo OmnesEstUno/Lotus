@@ -5,6 +5,7 @@ import {
   getSetupStatus,
   initSetup,
   login,
+  completeLogin,
   verify2FA,
   migrateLegacy,
   isAuthenticated,
@@ -69,6 +70,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasBiometricCreds, setHasBiometricCreds] = useState(false);
+  const [hasTotp, setHasTotp] = useState(false);
   const [oldTrustedDeviceTokenId, setOldTrustedDeviceTokenId] = useState<string | null>(null);
   const [biometricPrompted, setBiometricPrompted] = useState(false);
   const biometricCancelledRef = useRef(false);
@@ -135,10 +137,11 @@ export default function Login() {
 
     if (trustedToken) {
       trustedSecondFactor(trustedToken)
-        .then(({ preAuthToken, username, hasBiometricCreds, oldTokenId, displayName: tdDisplayName }) => {
+        .then(({ preAuthToken, username, hasBiometricCreds, hasTotp: trustedHasTotp, oldTokenId, displayName: tdDisplayName }) => {
           setUsername(username);
           setPreAuthToken(preAuthToken);
           setHasBiometricCreds(hasBiometricCreds);
+          setHasTotp(trustedHasTotp);
           setOldTrustedDeviceTokenId(oldTokenId);
           setTrustedDisplayName(tdDisplayName ?? null);
           setStep('login-totp');
@@ -166,6 +169,34 @@ export default function Login() {
     void runBiometric();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, hasBiometricCreds]);
+
+  useEffect(() => {
+    if (step !== 'login-totp') return;
+    if (hasTotp) return;
+    if (hasBiometricCreds) return;
+    if (!preAuthToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await completeLogin(preAuthToken, oldTrustedDeviceTokenId);
+        if (cancelled) return;
+        storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
+        const pending = sessionStore.get(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
+        if (pending) {
+          sessionStore.remove(STORAGE_KEYS.PENDING_WORKSPACE_INVITE);
+          window.location.hash = `#/workspace-invite?token=${encodeURIComponent(pending)}`;
+          return;
+        }
+        navigate('/dashboard');
+      } catch (err) {
+        if (cancelled) return;
+        setError((err as Error).message || 'Could not sign you in. Please try again.');
+        setStep('login-password');
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, hasTotp, hasBiometricCreds, preAuthToken]);
 
   async function runBiometric(): Promise<void> {
     biometricCancelledRef.current = false;
@@ -271,9 +302,10 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      const { preAuthToken: token, hasBiometricCreds: hasCreds } = await login(username, password);
+      const { preAuthToken: token, hasBiometricCreds: hasCreds, hasTotp: gotTotp } = await login(username, password);
       setPreAuthToken(token);
       setHasBiometricCreds(hasCreds);
+      setHasTotp(gotTotp);
       setBiometricPrompted(false);
       setStep('login-totp');
     } catch (err) {
@@ -683,66 +715,118 @@ export default function Login() {
 
         {/* Login Step 2: 2FA */}
         {step === 'login-totp' && (
-          <form onSubmit={handleVerify2FA} className="login-form">
-            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              Enter the 6-digit code from your authenticator app.
-            </p>
-            <div className="form-group">
-              <label className="form-label" htmlFor="login-totp-code">Authentication code</label>
-              <input
-                id="login-totp-code"
-                name="otp"
-                type="text"
-                inputMode="numeric"
-                className="input"
-                value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="000000"
-                autoComplete="one-time-code"
-                style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
-                autoFocus
-              />
-            </div>
-            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
-              {loading ? <span className="spinner" /> : 'Verify'}
-            </button>
-            {hasBiometricCreds && (
-              <button
-                type="button"
-                className="btn btn-ghost w-full"
-                onClick={() => {
-                  biometricCancelledRef.current = false;
-                  setBiometricPrompted(true);
-                  setError('');
-                  void runBiometric();
-                }}
-                disabled={loading}
-              >
-                Use a passkey or biometric
-              </button>
+          <>
+            {!hasTotp && !hasBiometricCreds && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '24px 0' }}>
+                <LotusSpinner />
+              </div>
             )}
-            <button
-              type="button"
-              className="btn btn-ghost w-full"
-              onClick={() => {
-                biometricCancelledRef.current = true;
-                clearTrustedDeviceToken();
-                storage.remove(STORAGE_KEYS.DISPLAY_NAME);
-                setUsername('');
-                setPassword('');
-                setTotpCode('');
-                setPreAuthToken('');
-                setHasBiometricCreds(false);
-                setOldTrustedDeviceTokenId(null);
-                setBiometricPrompted(false);
-                setTrustedDisplayName(null);
-                setError('');
-                setStep('login-password');
-              }}
-            >
-              Sign in as a different account
-            </button>
-          </form>
+            {hasTotp && (
+              <form onSubmit={handleVerify2FA} className="login-form">
+                <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                  Enter the 6-digit code from your authenticator app.
+                </p>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="login-totp-code">Authentication code</label>
+                  <input
+                    id="login-totp-code"
+                    name="otp"
+                    type="text"
+                    inputMode="numeric"
+                    className="input"
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    autoComplete="one-time-code"
+                    style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
+                    autoFocus
+                  />
+                </div>
+                <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+                  {loading ? <span className="spinner" /> : 'Verify'}
+                </button>
+                {hasBiometricCreds && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost w-full"
+                    onClick={() => {
+                      biometricCancelledRef.current = false;
+                      setBiometricPrompted(true);
+                      setError('');
+                      void runBiometric();
+                    }}
+                    disabled={loading}
+                  >
+                    Use a passkey or biometric
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost w-full"
+                  onClick={() => {
+                    biometricCancelledRef.current = true;
+                    clearTrustedDeviceToken();
+                    storage.remove(STORAGE_KEYS.DISPLAY_NAME);
+                    setUsername('');
+                    setPassword('');
+                    setTotpCode('');
+                    setPreAuthToken('');
+                    setHasBiometricCreds(false);
+                    setHasTotp(false);
+                    setOldTrustedDeviceTokenId(null);
+                    setBiometricPrompted(false);
+                    setTrustedDisplayName(null);
+                    setError('');
+                    setStep('login-password');
+                  }}
+                >
+                  Sign in as a different account
+                </button>
+              </form>
+            )}
+            {!hasTotp && hasBiometricCreds && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                  Verify with the biometric or passkey registered to this account. If the prompt didn't appear or you dismissed it, try again below.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-lg w-full"
+                  onClick={() => {
+                    biometricCancelledRef.current = false;
+                    setBiometricPrompted(true);
+                    setError('');
+                    void runBiometric();
+                  }}
+                  disabled={loading}
+                >
+                  {loading ? <span className="spinner" /> : 'Use a passkey or biometric'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost w-full"
+                  onClick={() => {
+                    biometricCancelledRef.current = true;
+                    clearTrustedDeviceToken();
+                    storage.remove(STORAGE_KEYS.DISPLAY_NAME);
+                    setUsername('');
+                    setPassword('');
+                    setTotpCode('');
+                    setPreAuthToken('');
+                    setHasBiometricCreds(false);
+                    setHasTotp(false);
+                    setOldTrustedDeviceTokenId(null);
+                    setBiometricPrompted(false);
+                    setTrustedDisplayName(null);
+                    setError('');
+                    setStep('login-password');
+                  }}
+                >
+                  Sign in as a different account
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         {/* Forgot password Step 1: username + TOTP */}

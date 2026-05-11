@@ -86,6 +86,7 @@ export interface TrustedSecondFactorResult {
   preAuthToken: string;
   username: string;
   hasBiometricCreds: boolean;
+  hasTotp: boolean;
   oldTokenId: string;
   displayName?: string;
 }

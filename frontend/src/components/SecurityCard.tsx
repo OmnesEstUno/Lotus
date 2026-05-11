@@ -12,7 +12,8 @@ import {
   markBiometricEnrolledLocally,
   type CredentialSummary,
 } from '../api/biometric';
-import { getCurrentUsername } from '../api/auth';
+import { getCurrentUsername, getAccountTotpStatus, accountTotpInit, accountTotpConfirm, accountTotpDelete } from '../api/auth';
+import TotpEnrollStep from './TotpEnrollStep';
 import { defaultDeviceLabel } from '../utils/webauthnUserAgent';
 import { dialog } from '../utils/dialog';
 import { sessionStore } from '../utils/storage';
@@ -41,6 +42,14 @@ export default function SecurityCard() {
   const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
   const [supported, setSupported] = useState<boolean>(true);
   const [loading, setLoading] = useState(true);
+  const [totpEnrolled, setTotpEnrolled] = useState<boolean>(false);
+  const [totpFlow, setTotpFlow] = useState<
+    | { kind: 'idle' }
+    | { kind: 'enrolling'; secret: string; otpauthUrl: string; setupToken: string; code: string }
+    | { kind: 'removing'; code: string }
+  >({ kind: 'idle' });
+  const [totpBusy, setTotpBusy] = useState(false);
+  const [totpError, setTotpError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reauthOpen, setReauthOpen] = useState(false);
@@ -53,9 +62,11 @@ export default function SecurityCard() {
     Promise.all([
       listCredentials().catch(() => ({ credentials: [] })),
       isPlatformAuthenticatorAvailable(),
-    ]).then(([{ credentials }, supported]) => {
+      getAccountTotpStatus().catch(() => ({ enrolled: false })),
+    ]).then(([{ credentials }, supported, { enrolled }]) => {
       setCredentials(credentials);
       setSupported(supported);
+      setTotpEnrolled(enrolled);
       setLoading(false);
     });
   }, []);
@@ -133,6 +144,58 @@ export default function SecurityCard() {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function startTotpEnroll() {
+    setTotpError('');
+    setTotpBusy(true);
+    try {
+      const { totpSecret, otpauthUrl, setupToken } = await accountTotpInit();
+      setTotpFlow({ kind: 'enrolling', secret: totpSecret, otpauthUrl, setupToken, code: '' });
+    } catch (e) {
+      setTotpError((e as Error).message || 'Could not start TOTP setup.');
+    } finally {
+      setTotpBusy(false);
+    }
+  }
+
+  async function confirmTotpEnroll(e: FormEvent) {
+    e.preventDefault();
+    if (totpFlow.kind !== 'enrolling') return;
+    if (totpFlow.code.length !== 6) return;
+    setTotpError('');
+    setTotpBusy(true);
+    try {
+      await accountTotpConfirm(totpFlow.setupToken, totpFlow.code);
+      setTotpEnrolled(true);
+      setTotpFlow({ kind: 'idle' });
+    } catch (e) {
+      setTotpError((e as Error).message || 'Could not confirm TOTP.');
+    } finally {
+      setTotpBusy(false);
+    }
+  }
+
+  async function startTotpRemove() {
+    setTotpError('');
+    setTotpFlow({ kind: 'removing', code: '' });
+  }
+
+  async function confirmTotpRemove(e: FormEvent) {
+    e.preventDefault();
+    if (totpFlow.kind !== 'removing') return;
+    if (totpFlow.code.length !== 6) return;
+    setTotpError('');
+    setTotpBusy(true);
+    try {
+      await accountTotpDelete(totpFlow.code);
+      setTotpEnrolled(false);
+      setTotpFlow({ kind: 'idle' });
+    } catch (e) {
+      setTotpError((e as Error).message || 'Could not remove TOTP.');
+    } finally {
+      setTotpBusy(false);
     }
   }
 
@@ -224,6 +287,109 @@ export default function SecurityCard() {
           )}
         </>
       )}
+      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+        <h3 style={{ marginBottom: 8 }}>Authenticator app</h3>
+        {totpEnrolled ? (
+          totpFlow.kind === 'removing' ? (
+            <form onSubmit={confirmTotpRemove} className="security-totp-prompt">
+              <p style={{ fontSize: 'var(--font-size-sm)', margin: 0 }}>
+                Enter the current 6-digit code from your authenticator to confirm removal.
+              </p>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="input"
+                value={totpFlow.code}
+                onChange={(e) =>
+                  setTotpFlow({ ...totpFlow, code: e.target.value.replace(/\D/g, '').slice(0, 6) })
+                }
+                placeholder="000000"
+                autoComplete="one-time-code"
+                autoFocus
+                style={{ textAlign: 'center', letterSpacing: '0.25em' }}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="submit" className="btn btn-primary" disabled={totpBusy || totpFlow.code.length !== 6}>
+                  {totpBusy ? <span className="spinner" /> : 'Remove'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setTotpFlow({ kind: 'idle' })}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="security-credential-row">
+              <span className="material-symbols-outlined security-credential-icon" aria-hidden="true">
+                lock_clock
+              </span>
+              <div className="security-credential-details">
+                <div className="security-credential-label">Authenticator app enabled</div>
+                <div className="security-credential-meta">Backup second factor on this account</div>
+              </div>
+              <button
+                className="btn btn-sm"
+                onClick={() => void startTotpRemove()}
+                disabled={busy || totpBusy}
+                style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger)' }}
+              >
+                Remove
+              </button>
+            </div>
+          )
+        ) : totpFlow.kind === 'enrolling' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <TotpEnrollStep
+              otpauthUrl={totpFlow.otpauthUrl}
+              secret={totpFlow.secret}
+              onContinue={() => { /* no-op — code input is right below */ }}
+            />
+            <form onSubmit={confirmTotpEnroll} className="security-totp-prompt">
+              <p style={{ fontSize: 'var(--font-size-sm)', margin: 0 }}>
+                Enter the 6-digit code from your authenticator to finish setup:
+              </p>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="input"
+                value={totpFlow.code}
+                onChange={(e) =>
+                  setTotpFlow({ ...totpFlow, code: e.target.value.replace(/\D/g, '').slice(0, 6) })
+                }
+                placeholder="000000"
+                autoComplete="one-time-code"
+                autoFocus
+                style={{ textAlign: 'center', letterSpacing: '0.25em' }}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="submit" className="btn btn-primary" disabled={totpBusy || totpFlow.code.length !== 6}>
+                  {totpBusy ? <span className="spinner" /> : 'Confirm'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setTotpFlow({ kind: 'idle' })}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <>
+            <p className="security-empty">
+              Pair an authenticator app (Google Authenticator, 1Password, Authy, etc.) to add a backup second factor for password changes, account deletion, and self-service password reset.
+            </p>
+            <button
+              className="btn btn-primary security-add-button"
+              onClick={() => void startTotpEnroll()}
+              disabled={busy || totpBusy}
+            >
+              {totpBusy ? <span className="spinner" /> : '+ Add authenticator app'}
+            </button>
+          </>
+        )}
+        {totpError && (
+          <div className="alert alert-danger" style={{ marginTop: 12 }}>
+            <RateLimitMessage message={totpError} />
+          </div>
+        )}
+      </div>
     </CollapsibleCard>
   );
 }

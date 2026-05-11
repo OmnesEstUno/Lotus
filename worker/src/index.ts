@@ -78,8 +78,8 @@ interface UserProfile {
   passwordHash: string;
   /**
    * Base32 TOTP shared secret. Absent (or empty string) means the user has
-   * not enrolled an authenticator app. Treat `Boolean(profile.totpSecret)`
-   * as the single source of truth for "TOTP enrolled."
+   * not enrolled an authenticator app. Use {@link hasTotpEnrolled} to test
+   * enrollment status at call sites rather than inspecting this field directly.
    */
   totpSecret?: string;
   createdAt: string;
@@ -241,7 +241,7 @@ async function saveUserProfile(kv: KVNamespace, username: string, profile: UserP
 
 /** True when the user has an authenticator-app secret on file. */
 function hasTotpEnrolled(profile: UserProfile): boolean {
-  return !!profile.totpSecret && profile.totpSecret.length > 0;
+  return Boolean(profile.totpSecret);
 }
 
 /**

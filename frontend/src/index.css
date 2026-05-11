@@ -269,22 +269,43 @@ a:hover { color: var(--accent-hover); }
   max-width: 16ch;
 }
 
-/* ─── Mobile navbar: brand centered in the space left of the actions ─────── */
+/* ─── Mobile navbar: brand truly centered via a balanced 3-column grid ───── */
 @media (max-width: 639px) {
   .navbar .container {
+    /* minmax(0, 1fr) | auto (brand) | minmax(0, 1fr) — the two flanking
+       columns are FORCED to equal width (min: 0 instead of auto means
+       content cannot grow them past their 1fr share). The brand auto
+       column sits between them at its content width. Result: the brand
+       is centered in the viewport regardless of how wide the right
+       column's content wants to be — overflowing content in the right
+       column clips inside it (overflow: hidden + ellipsis on the
+       descendants below). */
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
     column-gap: var(--space-2);
   }
-  .navbar-brand { grid-column: 1; justify-self: center; }
-  .navbar-links { grid-column: 2; justify-self: end; }
+  .navbar-brand { grid-column: 2; justify-self: center; }
+  .navbar-links {
+    grid-column: 3;
+    justify-self: end;
+    /* Allow the row to shrink so a long display name truncates inside
+       it instead of pushing the column wider than its share of the grid. */
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
   .nav-link-label { display: none; }
   /* Hug the icons to the right edge: drop horizontal padding on icon-only links. */
   .navbar-links .nav-link { padding-left: var(--space-2); padding-right: var(--space-2); }
   .navbar-links .nav-link:last-child { padding-right: 0; }
-  /* Truncate long usernames so the brand stays visually centered. */
-  .navbar-user { max-width: 8ch; font-size: var(--font-size-xs); }
+  /* Truncate long usernames; min-width: 0 is required for ellipsis inside
+     a flex/grid parent because the default min-width is auto = content. */
+  .navbar-user {
+    max-width: 8ch;
+    font-size: var(--font-size-xs);
+    min-width: 0;
+  }
 }
 
 .main-content-wrapper {

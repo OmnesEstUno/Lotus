@@ -36,6 +36,8 @@ import FeatureRequestCard from '../components/FeatureRequestCard';
 import FeatureRequestsAdminCard from '../components/FeatureRequestsAdminCard';
 import Layout from '../components/layout/Layout';
 import LotusSpinner from '../components/LotusSpinner';
+import { sessionStore } from '../utils/storage';
+import { STORAGE_KEYS } from '../utils/constants';
 
 interface CardVisibilityRowProps {
   id: CardId;
@@ -107,6 +109,11 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [accountOpen, setAccountOpen] = useState<boolean>(() => {
+    // Initialise from session-scoped focus flag set by BiometricPromptModal.
+    // Note: SecurityCard consumes (and clears) the flag itself; we only peek.
+    return sessionStore.get(STORAGE_KEYS.SETTINGS_FOCUS_SECURITY) === '1';
+  });
 
   useEffect(() => {
     // Gate on active instance: GET /api/transactions and /api/income require
@@ -260,7 +267,13 @@ export default function Settings() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       {/* ═══ ACCOUNT ═════════════════════════════════════════ */}
-      <CollapsibleCard title="Account" variant="group" iconName="person">
+      <CollapsibleCard
+        title="Account"
+        variant="group"
+        iconName="person"
+        open={accountOpen}
+        onOpenChange={setAccountOpen}
+      >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <AccountCard />
           <SecurityCard />

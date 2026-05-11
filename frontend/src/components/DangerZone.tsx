@@ -1,11 +1,11 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Transaction, IncomeEntry, UserCategories } from '../types';
 import CollapsibleCard from './CollapsibleCard';
 import PasswordInput from './PasswordInput';
 import RateLimitMessage from './RateLimitMessage';
 import { purgeAllData } from '../api/transactions';
-import { deleteAccount, getCurrentUsername } from '../api/auth';
+import { deleteAccount, getCurrentUsername, getAccountTotpStatus } from '../api/auth';
 import { dialog } from '../utils/dialog';
 import { downloadJSON } from '../utils/download';
 
@@ -35,6 +35,15 @@ export default function DangerZone({ transactions, income, userCategories, onPur
   const [delTyped, setDelTyped] = useState('');
   const [delWorking, setDelWorking] = useState(false);
   const [delError, setDelError] = useState('');
+  const [hasTotp, setHasTotp] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAccountTotpStatus()
+      .then(({ enrolled }) => { if (!cancelled) setHasTotp(enrolled); })
+      .catch(() => { if (!cancelled) setHasTotp(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleDeleteAccount(e: FormEvent) {
     e.preventDefault();
@@ -43,13 +52,13 @@ export default function DangerZone({ transactions, income, userCategories, onPur
       setDelError('Confirmation phrase does not match.');
       return;
     }
-    if (delTotp.length !== 6) {
+    if (hasTotp && delTotp.length !== 6) {
       setDelError('Enter the 6-digit code from your authenticator app.');
       return;
     }
     setDelWorking(true);
     try {
-      await deleteAccount(delPassword, delTotp);
+      await deleteAccount(delPassword, hasTotp ? delTotp : '');
       navigate('/login');
     } catch (err) {
       setDelError((err as Error).message || 'Could not delete account.');
@@ -177,21 +186,23 @@ export default function DangerZone({ transactions, income, userCategories, onPur
                   maxLength={256}
                 />
               </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" htmlFor="delete-account-totp">Authenticator code</label>
-                <input
-                  id="delete-account-totp"
-                  name="otp"
-                  type="text"
-                  inputMode="numeric"
-                  className="input"
-                  value={delTotp}
-                  onChange={(e) => setDelTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="000000"
-                  autoComplete="one-time-code"
-                  style={{ textAlign: 'center', letterSpacing: '0.25em', width: '100%' }}
-                />
-              </div>
+              {hasTotp && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" htmlFor="delete-account-totp">Authenticator code</label>
+                  <input
+                    id="delete-account-totp"
+                    name="otp"
+                    type="text"
+                    inputMode="numeric"
+                    className="input"
+                    value={delTotp}
+                    onChange={(e) => setDelTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    autoComplete="one-time-code"
+                    style={{ textAlign: 'center', letterSpacing: '0.25em', width: '100%' }}
+                  />
+                </div>
+              )}
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" htmlFor="delete-account-typed">
                   Type <strong style={{ color: 'var(--danger)' }}>DELETE MY ACCOUNT</strong> to confirm:

@@ -95,6 +95,11 @@ export default function SecurityCard() {
     try {
       const begin = await registerBegin(totpCodeArg);
       if ('requiresReauth' in begin) {
+        if (begin.requiresRelogin) {
+          setError('Your session is too old to enroll a new device. Please sign out and sign back in to continue.');
+          setBusy(false);
+          return;
+        }
         setReauthOpen(true);
         setBusy(false);
         return;

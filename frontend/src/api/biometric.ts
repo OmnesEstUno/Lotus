@@ -16,7 +16,7 @@ export interface CredentialSummary {
 
 export type RegisterBeginResult =
   | { options: PublicKeyCredentialCreationOptionsJSON }
-  | { requiresReauth: true };
+  | { requiresReauth: true; requiresRelogin?: boolean };
 
 export async function registerBegin(totpCode?: string): Promise<RegisterBeginResult> {
   return request<RegisterBeginResult>('/api/auth/biometric-register-begin', {

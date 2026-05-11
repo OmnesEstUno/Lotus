@@ -1067,7 +1067,7 @@ export default {
       // ── Account: change password ──
       if (path === '/api/account/change-password' && method === 'POST') {
         const body = await request.json() as { currentPassword?: string; newPassword?: string; totpCode?: string };
-        if (!body.currentPassword || !body.newPassword || !body.totpCode) {
+        if (!body.currentPassword || !body.newPassword) {
           return respond({ error: 'Missing fields.' }, 400, cors);
         }
         if (body.newPassword.length < 8) {
@@ -1076,6 +1076,11 @@ export default {
 
         const profile = await getUserProfile(env.FINANCE_KV, username);
         if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+
+        // TOTP is only required if the user has actually enrolled it.
+        if (hasTotpEnrolled(profile) && !body.totpCode) {
+          return respond({ error: 'Missing TOTP code.' }, 400, cors);
+        }
 
         // Rate-limit by username so brute-forcing the current password is bounded.
         const limitKey = KV_PREFIXES.RATELIMIT_LOGIN(username);
@@ -1086,8 +1091,10 @@ export default {
         if (!await verifyPassword(body.currentPassword, profile.passwordHash)) {
           return respond({ error: 'Current password is incorrect.', attemptsRemaining: rl.attemptsRemaining }, 401, cors);
         }
-        if (!await verifyTOTP(profile.totpSecret, body.totpCode)) {
-          return respond({ error: 'Invalid or expired code.' }, 401, cors);
+        if (hasTotpEnrolled(profile)) {
+          if (!await verifyTOTP(profile.totpSecret!, body.totpCode!)) {
+            return respond({ error: 'Invalid or expired code.' }, 401, cors);
+          }
         }
         if (await isPasswordReused(profile, body.newPassword)) {
           return respond({ error: 'You cannot reuse a recent password. Please choose a different one.' }, 400, cors);
@@ -1106,11 +1113,14 @@ export default {
           return respond({ error: 'The admin account cannot be deleted.' }, 403, cors);
         }
         const body = await request.json() as { currentPassword?: string; totpCode?: string };
-        if (!body.currentPassword || !body.totpCode) {
+        if (!body.currentPassword) {
           return respond({ error: 'Missing fields.' }, 400, cors);
         }
         const profile = await getUserProfile(env.FINANCE_KV, username);
         if (!profile) return respond({ error: 'User not found.' }, 404, cors);
+        if (hasTotpEnrolled(profile) && !body.totpCode) {
+          return respond({ error: 'Missing TOTP code.' }, 400, cors);
+        }
 
         // Re-auth: same rate limiter as login.
         const limitKey = KV_PREFIXES.RATELIMIT_LOGIN(username);
@@ -1121,8 +1131,10 @@ export default {
         if (!await verifyPassword(body.currentPassword, profile.passwordHash)) {
           return respond({ error: 'Current password is incorrect.', attemptsRemaining: rl.attemptsRemaining }, 401, cors);
         }
-        if (!await verifyTOTP(profile.totpSecret, body.totpCode)) {
-          return respond({ error: 'Invalid or expired code.' }, 401, cors);
+        if (hasTotpEnrolled(profile)) {
+          if (!await verifyTOTP(profile.totpSecret!, body.totpCode!)) {
+            return respond({ error: 'Invalid or expired code.' }, 401, cors);
+          }
         }
         await clearRateLimit(env.FINANCE_KV, limitKey);
 

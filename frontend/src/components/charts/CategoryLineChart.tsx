@@ -197,85 +197,89 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
             Tip: Click a chip to show/hide a category. Click a data point to isolate it; click more points to compare.
           </p>
 
-          <ResponsiveContainer width="100%" height={isNarrow ? 480 : CHART_HEIGHT_PX}>
-            <LineChart
-          data={data}
-          margin={isNarrow
-            ? { top: 4, right: 8, left: 0, bottom: 4 }
-            : { top: 4, right: 16, left: 8, bottom: 4 }}
-          onClick={(e: unknown) => {
-            // Click on empty chart area clears selection
-            const ev = e as { activePayload?: unknown } | null;
-            if (!ev || !ev.activePayload) setSelectedSet(new Set());
-          }}
-        >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            dataKey="label"
-            tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-            axisLine={{ stroke: 'var(--border)' }}
-            tickLine={false}
-            interval={isNarrow ? 'preserveStartEnd' : 0}
-            label={{ value: 'Time Period', position: 'insideBottom', offset: -4, fill: 'var(--text-muted)', fontSize: 11 }}
-          />
-          <YAxis
-            tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
-            domain={[0, Math.ceil((maxValue * CHART_Y_AXIS_HEADROOM) / CHART_Y_TICK_STEP) * CHART_Y_TICK_STEP || 100]}
-            label={isNarrow ? undefined : {
-              value: 'Amount ($)',
-              angle: -90,
-              position: 'insideLeft',
-              offset: 12,
-              fill: 'var(--text-muted)',
-              fontSize: 11,
-            }}
-          />
-          <Tooltip content={<CustomTooltip selectedSet={selectedSet} />} />
-          {allCategories.map((cat) => {
-            if (!activeCategories.has(cat)) return null;
-            const emphasized = isEmphasized(cat);
-            const faded = isFaded(cat);
-            const nonZeroCount = data.filter((d) => {
-              const v = d[cat] as number | undefined;
-              return v !== undefined && v > 0;
-            }).length;
-            return (
-              <Line
-                key={cat}
-                type="monotone"
-                dataKey={cat}
-                stroke={getCategoryColor(cat)}
-                strokeWidth={emphasized ? 3 : 1.5}
-                dot={nonZeroCount <= 1 ? {
-                  r: 4,
-                  strokeWidth: 2,
-                  stroke: getCategoryColor(cat),
-                  fill: 'var(--bg-card)',
-                } : false}
-                activeDot={{
-                  r: 5,
-                  strokeWidth: 2,
-                  stroke: getCategoryColor(cat),
-                  fill: 'var(--bg-card)',
-                  style: { cursor: 'pointer' },
-                  onMouseEnter: () => setHoveredLine(cat),
-                  onMouseLeave: () => setHoveredLine(null),
-                  onClick: (e: { stopPropagation?: () => void }) => {
-                    e?.stopPropagation?.();
-                    toggleSelected(cat);
-                  },
-                }}
-                opacity={faded ? 0.15 : 1}
-                onMouseEnter={() => setHoveredLine(cat)}
-                onMouseLeave={() => setHoveredLine(null)}
+          <div className="spending-trends-scroll-wrap">
+            <div className="spending-trends-scroll-inner">
+              <ResponsiveContainer width="100%" height={isNarrow ? 480 : CHART_HEIGHT_PX}>
+                <LineChart
+              data={data}
+              margin={isNarrow
+                ? { top: 4, right: 8, left: 0, bottom: 4 }
+                : { top: 4, right: 16, left: 8, bottom: 4 }}
+              onClick={(e: unknown) => {
+                // Click on empty chart area clears selection
+                const ev = e as { activePayload?: unknown } | null;
+                if (!ev || !ev.activePayload) setSelectedSet(new Set());
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                interval={isNarrow ? 'preserveStartEnd' : 0}
+                label={{ value: 'Time Period', position: 'insideBottom', offset: -4, fill: 'var(--text-muted)', fontSize: 11 }}
               />
-            );
-          })}
-        </LineChart>
-          </ResponsiveContainer>
+              <YAxis
+                tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
+                domain={[0, Math.ceil((maxValue * CHART_Y_AXIS_HEADROOM) / CHART_Y_TICK_STEP) * CHART_Y_TICK_STEP || 100]}
+                label={isNarrow ? undefined : {
+                  value: 'Amount ($)',
+                  angle: -90,
+                  position: 'insideLeft',
+                  offset: 12,
+                  fill: 'var(--text-muted)',
+                  fontSize: 11,
+                }}
+              />
+              <Tooltip content={<CustomTooltip selectedSet={selectedSet} />} />
+              {allCategories.map((cat) => {
+                if (!activeCategories.has(cat)) return null;
+                const emphasized = isEmphasized(cat);
+                const faded = isFaded(cat);
+                const nonZeroCount = data.filter((d) => {
+                  const v = d[cat] as number | undefined;
+                  return v !== undefined && v > 0;
+                }).length;
+                return (
+                  <Line
+                    key={cat}
+                    type="monotone"
+                    dataKey={cat}
+                    stroke={getCategoryColor(cat)}
+                    strokeWidth={emphasized ? 3 : 1.5}
+                    dot={nonZeroCount <= 1 ? {
+                      r: 4,
+                      strokeWidth: 2,
+                      stroke: getCategoryColor(cat),
+                      fill: 'var(--bg-card)',
+                    } : false}
+                    activeDot={{
+                      r: 5,
+                      strokeWidth: 2,
+                      stroke: getCategoryColor(cat),
+                      fill: 'var(--bg-card)',
+                      style: { cursor: 'pointer' },
+                      onMouseEnter: () => setHoveredLine(cat),
+                      onMouseLeave: () => setHoveredLine(null),
+                      onClick: (e: { stopPropagation?: () => void }) => {
+                        e?.stopPropagation?.();
+                        toggleSelected(cat);
+                      },
+                    }}
+                    opacity={faded ? 0.15 : 1}
+                    onMouseEnter={() => setHoveredLine(cat)}
+                    onMouseLeave={() => setHoveredLine(null)}
+                  />
+                );
+              })}
+            </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </>
       )}
     </div>

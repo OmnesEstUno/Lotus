@@ -1595,6 +1595,27 @@ a:hover { color: var(--accent-hover); }
   -webkit-overflow-scrolling: touch;
 }
 
+/* ─── Spending Trends chart horizontal scroll (mobile only) ─────────────── */
+/* Desktop renders the line chart at the container's full width.
+   On mobile the chart is too narrow to read; force a 720px min-width on
+   the inner sizer so the ResponsiveContainer renders at that width and
+   the wrapper scrolls horizontally. */
+@media (max-width: 639px) {
+  .spending-trends-scroll-wrap {
+    overflow-x: auto;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+    /* Subtle visual cue that this region scrolls. */
+    padding-bottom: 4px;
+  }
+  .spending-trends-scroll-inner {
+    /* 720px is enough to display ~12 month labels without overlap and
+       gives the recharts XAxis interval=0 room to breathe on the
+       common 1-year time range. */
+    min-width: 720px;
+  }
+}
+
 /* ─── Mobile FAB sizing: halve to 48×48 and hide labels ────────────────── */
 @media (max-width: 639px) {
   .fab-enter-data,

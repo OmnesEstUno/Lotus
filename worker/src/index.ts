@@ -84,7 +84,6 @@ interface UserProfile {
   totpSecret?: string;
   createdAt: string;
   confirmed: boolean;
-  pendingInviteId?: string;
   instanceIds?: string[];
   activeInstanceId?: string | null;
   /**

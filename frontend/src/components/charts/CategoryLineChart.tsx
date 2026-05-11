@@ -217,7 +217,7 @@ export default function CategoryLineChart({ transactions, timeRange, customRange
                 tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
                 axisLine={{ stroke: 'var(--border)' }}
                 tickLine={false}
-                interval={isNarrow ? 'preserveStartEnd' : 0}
+                interval={0}
                 label={{ value: 'Time Period', position: 'insideBottom', offset: -4, fill: 'var(--text-muted)', fontSize: 11 }}
               />
               <YAxis

@@ -1212,14 +1212,20 @@ export default {
         const body = await request.json().catch(() => ({})) as { totpCode?: string };
 
         if (sessionAge > BIOMETRIC_REAUTH_THRESHOLD_SECONDS) {
-          if (!body.totpCode) {
-            return respond({ requiresReauth: true }, 200, cors);
+          const profile = await getUserProfile(env.FINANCE_KV, username);
+          if (!profile) return respond({ error: 'User not found.' }, 401, cors);
+
+          if (hasTotpEnrolled(profile)) {
+            if (!body.totpCode) {
+              return respond({ requiresReauth: true }, 200, cors);
+            }
+            const valid = await verifyTOTP(profile.totpSecret!, body.totpCode);
+            if (!valid) return respond({ error: 'Invalid TOTP code.' }, 401, cors);
+          } else {
+            // No TOTP on file — the user can't satisfy the re-auth gate in-flow.
+            // Tell the client to re-login entirely.
+            return respond({ requiresReauth: true, requiresRelogin: true }, 200, cors);
           }
-          const raw = await env.FINANCE_KV.get(KV_PREFIXES.USER(username, 'profile'));
-          if (!raw) return respond({ error: 'User not found.' }, 401, cors);
-          const profile = JSON.parse(raw) as { totpSecret: string };
-          const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
-          if (!valid) return respond({ error: 'Invalid TOTP code.' }, 401, cors);
         }
 
         const rl = await checkAndIncrement(

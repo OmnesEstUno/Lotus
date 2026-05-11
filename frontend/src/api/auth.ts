@@ -29,7 +29,12 @@ export async function getSetupStatus(): Promise<{ initialized: boolean; migratio
   return request('/api/setup/status');
 }
 
-export async function initSetup(username: string, password: string, inviteToken: string, displayName?: string): Promise<{ totpSecret: string; username: string; setupToken: string }> {
+export async function initSetup(
+  username: string,
+  password: string,
+  inviteToken: string,
+  displayName?: string,
+): Promise<{ ok: true; username: string }> {
   return request('/api/setup/init', {
     method: 'POST',
     body: JSON.stringify({ username, password, inviteToken, displayName }),
@@ -40,14 +45,10 @@ export function getCurrentDisplayName(): string | null {
   return storage.get(STORAGE_KEYS.DISPLAY_NAME);
 }
 
-export async function confirmSetup(username: string, totpCode: string, setupToken: string): Promise<void> {
-  return request('/api/setup/confirm', {
-    method: 'POST',
-    body: JSON.stringify({ username, totpCode, setupToken }),
-  });
-}
-
-export async function login(username: string, password: string): Promise<{ preAuthToken: string; hasBiometricCreds: boolean; displayName?: string }> {
+export async function login(
+  username: string,
+  password: string,
+): Promise<{ preAuthToken: string; hasBiometricCreds: boolean; hasTotp: boolean; displayName?: string }> {
   return request('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
@@ -69,6 +70,23 @@ export async function verify2FA(
   const result = await request<Verify2FAResult>('/api/auth/verify-2fa', {
     method: 'POST',
     body: JSON.stringify({ preAuthToken, totpCode, oldTrustedDeviceTokenId }),
+  });
+  setToken(result.token);
+  storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
+  storage.set(STORAGE_KEYS.USERNAME, result.username);
+  if (result.displayName) storage.set(STORAGE_KEYS.DISPLAY_NAME, result.displayName);
+  else storage.remove(STORAGE_KEYS.DISPLAY_NAME);
+  notifyUsernameChange(result.username);
+  return result;
+}
+
+export async function completeLogin(
+  preAuthToken: string,
+  oldTrustedDeviceTokenId: string | null = null,
+): Promise<Verify2FAResult> {
+  const result = await request<Verify2FAResult>('/api/auth/complete-login', {
+    method: 'POST',
+    body: JSON.stringify({ preAuthToken, oldTrustedDeviceTokenId }),
   });
   setToken(result.token);
   storage.set(STORAGE_KEYS.TRUSTED_DEVICE, result.trustedDeviceJwt);
@@ -228,4 +246,28 @@ export async function listAdminResetTokens(): Promise<{ tokens: AdminResetTokenS
 
 export async function deleteAdminResetToken(id: string): Promise<void> {
   return request(`/api/admin/password-reset-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// ─── Account: TOTP self-enrollment ────────────────────────────────────────────
+
+export async function getAccountTotpStatus(): Promise<{ enrolled: boolean }> {
+  return request('/api/account/totp/status');
+}
+
+export async function accountTotpInit(): Promise<{ totpSecret: string; otpauthUrl: string; setupToken: string }> {
+  return request('/api/account/totp/init', { method: 'POST', body: JSON.stringify({}) });
+}
+
+export async function accountTotpConfirm(setupToken: string, totpCode: string): Promise<{ ok: true }> {
+  return request('/api/account/totp/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ setupToken, totpCode }),
+  });
+}
+
+export async function accountTotpDelete(totpCode: string): Promise<{ ok: true }> {
+  return request('/api/account/totp', {
+    method: 'DELETE',
+    body: JSON.stringify({ totpCode }),
+  });
 }

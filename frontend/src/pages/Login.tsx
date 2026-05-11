@@ -71,6 +71,7 @@ export default function Login() {
   const [setupToken, setSetupToken] = useState('');
   const [preAuthToken, setPreAuthToken] = useState('');
   const [inviteToken, setInviteToken] = useState('');
+  const [inviteTokenFromUrl, setInviteTokenFromUrl] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasBiometricCreds, setHasBiometricCreds] = useState(false);
@@ -119,6 +120,7 @@ export default function Login() {
       try { decoded = decodeURIComponent(inviteMatch[1]); }
       catch { return; }
       setInviteToken(decoded);
+      setInviteTokenFromUrl(true);
       setStep('setup-password');
       history.replaceState(null, '', window.location.pathname + window.location.search + '#/signup');
       return;
@@ -579,20 +581,22 @@ export default function Login() {
             <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: 8 }}>
               Create a username, password, and set up two-factor authentication to protect your financial data.
             </p>
-            <div className="form-group">
-              <label className="form-label" htmlFor="setup-invite-token">Invite token</label>
-              <input
-                id="setup-invite-token"
-                name="invite-token"
-                type="text"
-                className="input"
-                value={inviteToken}
-                onChange={(e) => setInviteToken(e.target.value)}
-                placeholder="Paste your invite token"
-                autoComplete="off"
-                required
-              />
-            </div>
+            {!inviteTokenFromUrl && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="setup-invite-token">Invite token</label>
+                <input
+                  id="setup-invite-token"
+                  name="invite-token"
+                  type="text"
+                  className="input"
+                  value={inviteToken}
+                  onChange={(e) => setInviteToken(e.target.value)}
+                  placeholder="Paste your invite token"
+                  autoComplete="off"
+                  required
+                />
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label" htmlFor="setup-username">Username</label>
               <input

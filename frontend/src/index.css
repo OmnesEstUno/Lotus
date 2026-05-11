@@ -1735,6 +1735,19 @@ a:hover { color: var(--accent-hover); }
   color: var(--text-muted);
   font-size: var(--font-size-xs);
 }
+/* On narrow viewports the headerExtra (e.g. WorkspacesCard's "Create new
+   workspace" button) drops to its own row below the title so it cannot
+   clip off the right edge. Desktop keeps the inline row. */
+@media (max-width: 639px) {
+  .collapsible-card-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-3);
+  }
+  .collapsible-card-extra {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
 .collapsible-card-chevron {
   flex-shrink: 0;
   font-size: 24px;

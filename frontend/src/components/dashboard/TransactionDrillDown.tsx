@@ -395,8 +395,15 @@ export default function TransactionDrillDown({
               }
 
               return (
-                <tr key={k} style={isSelected ? { background: 'var(--accent-dim)' } : undefined}>
-                  <td>
+                <tr
+                  key={k}
+                  onClick={() => toggleOne(e)}
+                  style={{
+                    cursor: 'pointer',
+                    ...(isSelected ? { background: 'var(--accent-dim)' } : {}),
+                  }}
+                >
+                  <td onClick={(ev) => ev.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={isSelected}
@@ -406,7 +413,10 @@ export default function TransactionDrillDown({
                   <td className="text-sm font-mono" style={{ whiteSpace: 'nowrap' }}>{e.date}</td>
                   <td>{e.description}</td>
                   {e.kind === 'expense' ? (
-                    <td style={{ maxWidth: 180, verticalAlign: 'top', padding: 0 }}>
+                    <td
+                      style={{ maxWidth: 180, verticalAlign: 'top', padding: 0 }}
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
                       <NotesCell
                         value={e.notes ?? ''}
                         onCommit={(notes) => onUpdateTransaction(e.id, { notes })}
@@ -445,7 +455,7 @@ export default function TransactionDrillDown({
                   <td className={`num ${e.kind === 'income' ? 'text-success' : 'text-danger'}`}>
                     {e.kind === 'income' ? '+' : ''}{formatCurrency(e.amount)}
                   </td>
-                  <td>
+                  <td onClick={(ev) => ev.stopPropagation()}>
                     <RowActionsMenu
                       disabled={busy}
                       actions={[

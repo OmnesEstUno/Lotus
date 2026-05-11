@@ -1784,7 +1784,7 @@ a:hover { color: var(--accent-hover); }
   -webkit-tap-highlight-color: transparent;
 }
 .collapsible-card:has(.collapsible-card-toggle[aria-expanded="false"]):active {
-  background: var(--bg-elevated);
+  background: var(--accent-dim);
 }
 
 /* ─── CollapsibleCard variant: group ─────────────────────────────────────── */

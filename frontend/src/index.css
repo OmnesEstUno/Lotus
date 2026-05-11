@@ -1182,6 +1182,37 @@ a:hover { color: var(--accent-hover); }
 /* CheckmarkToggle renders a <button> without .btn, so category chips are unaffected. */
 /* Drag handle uses .dashboard-card-handle (no .btn class), also unaffected. */
 
+/* ─── Dashboard card header: stack title + actions on mobile ─────────────── */
+@media (max-width: 639px) {
+  /* The dashboard-card-header (.card-header inside .section) wraps so the
+     header actions (e.g. YearSelector + "Back to full year") drop below
+     the title row instead of being squeezed alongside it. The minimize
+     button stays anchored to the right of the title row. */
+  .section > .card > .card-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+    column-gap: var(--space-2);
+  }
+  .section > .card > .card-header .dashboard-card-header-left {
+    /* Keep the title row taking the full width minus the minimize button. */
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .section > .card > .card-header .dashboard-card-actions {
+    /* Push the action row to its own line below the title. */
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+  /* Allow the title to truncate cleanly instead of pushing the minimize
+     button. */
+  .section > .card > .card-header .dashboard-card-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* ─── Net Balance chart: smooth hover opacity transition ─────────────────── */
 .net-balance-chart .recharts-bar-rectangle,
 .net-balance-chart .recharts-bar-rectangle path,

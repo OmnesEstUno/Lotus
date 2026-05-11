@@ -341,7 +341,6 @@ export default function SecurityCard() {
             <TotpEnrollStep
               otpauthUrl={totpFlow.otpauthUrl}
               secret={totpFlow.secret}
-              onContinue={() => { /* no-op — code input is right below */ }}
             />
             <form onSubmit={confirmTotpEnroll} className="security-totp-prompt">
               <p style={{ fontSize: 'var(--font-size-sm)', margin: 0 }}>

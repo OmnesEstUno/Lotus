@@ -4,10 +4,9 @@ import { QRCodeSVG } from 'qrcode.react';
 interface Props {
   otpauthUrl: string;
   secret: string;
-  onContinue: () => void;
 }
 
-export default function TotpEnrollStep({ otpauthUrl, secret, onContinue }: Props) {
+export default function TotpEnrollStep({ otpauthUrl, secret }: Props) {
   const [copied, setCopied] = useState(false);
   const [showApps, setShowApps] = useState(false);
 
@@ -138,9 +137,6 @@ export default function TotpEnrollStep({ otpauthUrl, secret, onContinue }: Props
         </div>
       )}
 
-      <button className="btn btn-primary w-full" onClick={onContinue}>
-        I've added it to my app
-      </button>
     </div>
   );
 }

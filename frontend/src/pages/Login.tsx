@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { startAuthentication } from '@simplewebauthn/browser';
-import TotpEnrollStep from '../components/TotpEnrollStep';
 import {
   getSetupStatus,
   initSetup,
-  confirmSetup,
   login,
   verify2FA,
   migrateLegacy,
@@ -37,8 +35,6 @@ type Step =
   | 'loading'
   | 'migrate'
   | 'setup-password'
-  | 'setup-totp'
-  | 'setup-confirm'
   | 'login-password'
   | 'login-totp'
   | 'forgot-username-totp'
@@ -67,8 +63,6 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
-  const [totpSecret, setTotpSecret] = useState('');
-  const [setupToken, setSetupToken] = useState('');
   const [preAuthToken, setPreAuthToken] = useState('');
   const [inviteToken, setInviteToken] = useState('');
   const [inviteTokenFromUrl, setInviteTokenFromUrl] = useState(false);
@@ -256,38 +250,15 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { totpSecret: secret, setupToken: token } = await initSetup(trimmedUsername, password, inviteToken, displayName.trim() || undefined);
+      await initSetup(trimmedUsername, password, inviteToken, displayName.trim() || undefined);
       setUsername(trimmedUsername);
-      setTotpSecret(secret);
-      setSetupToken(token);
-      setStep('setup-totp');
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── Setup Step 3: confirm TOTP ──
-
-  async function handleSetupConfirm(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    if (totpCode.length !== 6) {
-      setError('Please enter the 6-digit code from your authenticator app.');
-      return;
-    }
-    setLoading(true);
-    try {
-      await confirmSetup(username, totpCode, setupToken);
-      // Trigger one-time biometric onboarding modal on first dashboard mount.
+      // First-login biometric onboarding (modal also surfaces optional TOTP).
       storage.set(STORAGE_KEYS.BIOMETRIC_PROMPT_PENDING, '1');
       setStep('login-password');
       setPassword('');
-      setTotpCode('');
+      setConfirmPassword('');
     } catch (err) {
-      console.error(err);
-      setError((err as Error).message || 'The code you entered is incorrect. Make sure your authenticator app is synced and try again.');
+      setError((err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -444,10 +415,6 @@ export default function Login() {
     }
   }
 
-  const otpauthUrl = totpSecret
-    ? `otpauth://totp/Lotus:${encodeURIComponent(username || 'Lotus')}?secret=${totpSecret}&issuer=Lotus&algorithm=SHA1&digits=6&period=30`
-    : '';
-
   if (step === 'loading') {
     return <LotusSpinner />;
   }
@@ -461,24 +428,6 @@ export default function Login() {
             type="button"
             style={backButtonStyle}
             onClick={() => goBack('login-password', () => setTotpCode(''))}
-          >
-            ← Back
-          </button>
-        )}
-        {step === 'setup-totp' && (
-          <button
-            type="button"
-            style={backButtonStyle}
-            onClick={() => goBack('setup-password', () => setTotpCode(''))}
-          >
-            ← Back
-          </button>
-        )}
-        {step === 'setup-confirm' && (
-          <button
-            type="button"
-            style={backButtonStyle}
-            onClick={() => goBack('setup-totp', () => setTotpCode(''))}
           >
             ← Back
           </button>
@@ -503,7 +452,7 @@ export default function Login() {
           <p className="subtitle" style={{ marginTop: 10 }}>
             {step === 'migrate'
               ? 'Claim your existing data'
-              : step === 'setup-password' || step === 'setup-totp' || step === 'setup-confirm'
+              : step === 'setup-password'
               ? 'First-time setup'
               : step === 'forgot-username-totp' || step === 'forgot-webauthn' || step === 'forgot-new-password' || step === 'admin-reset'
               ? 'Reset your password'
@@ -579,7 +528,7 @@ export default function Login() {
         {step === 'setup-password' && (
           <form onSubmit={handleSetupPassword} className="login-form">
             <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: 8 }}>
-              Create a username, password, and set up two-factor authentication to protect your financial data.
+              Create a username and password to protect your financial data. You can add biometric and authenticator-app sign-in from Settings after you log in.
             </p>
             {!inviteTokenFromUrl && (
               <div className="form-group">
@@ -671,43 +620,6 @@ export default function Login() {
               onClick={() => goBack('login-password')}
             >
               Back to log in
-            </button>
-          </form>
-        )}
-
-        {/* Setup Step 2: QR Code */}
-        {step === 'setup-totp' && (
-          <TotpEnrollStep
-            otpauthUrl={otpauthUrl}
-            secret={totpSecret}
-            onContinue={() => setStep('setup-confirm')}
-          />
-        )}
-
-        {/* Setup Step 3: Confirm TOTP */}
-        {step === 'setup-confirm' && (
-          <form onSubmit={handleSetupConfirm} className="login-form">
-            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              Enter the 6-digit code from your authenticator app to confirm setup.
-            </p>
-            <div className="form-group">
-              <label className="form-label" htmlFor="setup-totp-code">Verification code</label>
-              <input
-                id="setup-totp-code"
-                name="otp"
-                type="text"
-                inputMode="numeric"
-                className="input"
-                value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="000000"
-                autoComplete="one-time-code"
-                style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.25em' }}
-                autoFocus
-              />
-            </div>
-            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
-              {loading ? <span className="spinner" /> : 'Complete Setup'}
             </button>
           </form>
         )}

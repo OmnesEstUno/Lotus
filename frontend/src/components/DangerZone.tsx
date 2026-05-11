@@ -132,7 +132,7 @@ export default function DangerZone({ transactions, income, userCategories, onPur
 
       {/* Backup / export (safe) */}
       <div style={{ marginBottom: 24 }}>
-        <h3 style={{ color: 'var(--text-secondary)', marginBottom: 8 }}>Download backup</h3>
+        <h3 style={{ color: 'var(--danger)', marginBottom: 8 }}>Download backup</h3>
         <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.875rem' }}>
           Save a complete JSON backup of your transactions, income, and custom categories to
           your computer. Recommended before any destructive action.

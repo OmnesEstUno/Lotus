@@ -681,11 +681,13 @@ export default {
           return respond({ error: `Too many attempts. Try again in ${totpRl.remainingSeconds} second(s).` }, 429, cors);
         }
 
-        const raw = await env.FINANCE_KV.get(userKey(username, 'profile'));
-        if (!raw) return respond({ error: 'User not found.' }, 401, cors);
-        const profile = JSON.parse(raw) as { totpSecret: string; displayName?: string };
+        const profile = await getUserProfile(env.FINANCE_KV, username);
+        if (!profile) return respond({ error: 'User not found.' }, 401, cors);
+        if (!hasTotpEnrolled(profile)) {
+          return respond({ error: 'TOTP is not enrolled for this account.' }, 400, cors);
+        }
 
-        const valid = await verifyTOTP(profile.totpSecret, body.totpCode);
+        const valid = await verifyTOTP(profile.totpSecret!, body.totpCode);
         if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
 
         // Clear rate-limit and preauth token on success.
@@ -897,8 +899,15 @@ export default {
 
         const profile = await getUserProfile(env.FINANCE_KV, username);
         if (!profile) return respond({ error: 'Invalid credentials.' }, 401, cors);
+        // If the user has no TOTP, self-service reset isn't available — they
+        // must use an admin-issued reset link instead. Match the generic
+        // "Invalid credentials" wording used elsewhere so we don't reveal
+        // which usernames have TOTP set up.
+        if (!hasTotpEnrolled(profile)) {
+          return respond({ error: 'Invalid credentials.' }, 401, cors);
+        }
 
-        const valid = await verifyTOTP(profile.totpSecret, totpCode);
+        const valid = await verifyTOTP(profile.totpSecret!, totpCode);
         if (!valid) return respond({ error: 'Invalid or expired code.' }, 401, cors);
 
         await clearRateLimit(env.FINANCE_KV, limitKey);

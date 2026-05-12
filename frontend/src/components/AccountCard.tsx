@@ -75,7 +75,7 @@ export default function AccountCard() {
   }
 
   return (
-    <CollapsibleCard title="Account">
+    <CollapsibleCard title="Credentials">
       {/* ── Display name ── */}
       <h3 style={{ marginTop: 0, marginBottom: 8 }}>Display name</h3>
       <form onSubmit={handleSaveName} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>

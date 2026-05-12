@@ -479,7 +479,7 @@ export default function Login() {
           <Logo size={56} color="var(--accent)" style={{ margin: '0 auto 12px' }} />
           <h1 style={{ fontSize: '1.5rem' }}>Lotus</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', marginTop: 2, letterSpacing: '0.01em' }}>
-            Budget. Bloom. Balance
+            Budget. Balance. Bloom.
           </p>
           <p className="subtitle" style={{ marginTop: 10 }}>
             {step === 'migrate'

@@ -246,7 +246,7 @@ export default function Settings() {
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: '1.5rem', marginBottom: 4 }}>Settings</h1>
         <p style={{ color: 'var(--text-muted)' }}>
-          Manage your custom categories and description-to-category mappings.
+          Change details about your account. View and edit Workspace settings.
         </p>
       </div>
 

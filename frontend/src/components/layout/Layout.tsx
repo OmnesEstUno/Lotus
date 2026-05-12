@@ -34,7 +34,7 @@ export default function Layout({ children }: LayoutProps) {
             <span className="navbar-brand">
               <Logo size={22} color="var(--accent)" />
               Lotus
-              <span className="navbar-tagline hide-mobile">Budget. Bloom. Balance</span>
+              <span className="navbar-tagline hide-mobile">Budget. Balance. Bloom.</span>
             </span>
             <div className="navbar-links">
               {currentUser && (

@@ -86,14 +86,15 @@ export default function CollapsibleCard({
             </span>
           )}
           <h2 className="collapsible-card-title" style={titleStyle}>{title}</h2>
-          <span
-            className="material-symbols-outlined collapsible-card-chevron"
-            aria-hidden="true"
-          >
-            expand_more
-          </span>
         </button>
         {headerExtra && <div className="collapsible-card-extra">{headerExtra}</div>}
+        <span
+          className="material-symbols-outlined collapsible-card-chevron"
+          aria-hidden="true"
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
+        >
+          expand_more
+        </span>
       </div>
       <div className="collapsible-card-body" data-open={open}>
         <div className="collapsible-card-body-inner">{children}</div>

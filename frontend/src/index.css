@@ -1819,7 +1819,10 @@ a:hover { color: var(--accent-hover); }
 }
 /* On narrow viewports the headerExtra (e.g. WorkspacesCard's "Create new
    workspace" button) drops to its own row below the title so it cannot
-   clip off the right edge. Desktop keeps the inline row. */
+   clip off the right edge. The chevron stays on row 1 next to the title
+   via flex `order` — without that, it would land on a third row below
+   the wrapped headerExtra because of source order. Desktop keeps the
+   inline row. */
 @media (max-width: 639px) {
   .collapsible-card-header {
     flex-wrap: wrap;
@@ -1828,15 +1831,17 @@ a:hover { color: var(--accent-hover); }
   .collapsible-card-extra {
     flex-basis: 100%;
     justify-content: flex-end;
+    order: 2;
   }
 }
 .collapsible-card-chevron {
   flex-shrink: 0;
   font-size: 24px;
   color: var(--text-muted);
+  cursor: pointer;
   transition: transform 200ms ease-out;
 }
-.collapsible-card-toggle[aria-expanded="true"] .collapsible-card-chevron {
+.collapsible-card:has(.collapsible-card-toggle[aria-expanded="true"]) .collapsible-card-chevron {
   transform: rotate(180deg);
 }
 .collapsible-card-body {
@@ -1865,8 +1870,10 @@ a:hover { color: var(--accent-hover); }
 }
 
 /* Whole card is clickable when collapsed (component wires the onClick).
-   The cursor hint makes the affordance discoverable. */
-.collapsible-card:has(.collapsible-card-toggle[aria-expanded="false"]) {
+   The cursor hint makes the affordance discoverable. The :has() path is
+   direct-child only so a nested collapsed sub-card doesn't make its open
+   parent also appear clickable. */
+.collapsible-card:has(> .collapsible-card-header > .collapsible-card-toggle[aria-expanded="false"]) {
   cursor: pointer;
 }
 
@@ -1874,11 +1881,13 @@ a:hover { color: var(--accent-hover); }
    when collapsed). Disable the default rectangular mobile tap highlight
    so a tap doesn't flash a non-rounded gray box that ignores the card's
    border-radius. The :active state below gives a rounded, theme-aware
-   replacement so the tap still has a visual confirmation. */
+   replacement so the tap still has a visual confirmation. The :has()
+   path is direct-child only so clicks on a nested sub-card don't flash
+   the parent group card.  */
 .collapsible-card {
   -webkit-tap-highlight-color: transparent;
 }
-.collapsible-card:has(.collapsible-card-toggle[aria-expanded="false"]):active {
+.collapsible-card:has(> .collapsible-card-header > .collapsible-card-toggle[aria-expanded="false"]):active {
   background: var(--accent-dim);
 }
 
@@ -1934,9 +1943,10 @@ a:hover { color: var(--accent-hover); }
 }
 /* Hover-only-when-collapsed: applies to the clickable header, not the
    expanded body, so an open card doesn't pulse under the cursor. The
-   :has() selector targets the outer .card when its inner toggle button
-   is collapsed AND hovered. */
-.collapsible-card--card:has(.collapsible-card-toggle[aria-expanded="false"]:hover) {
+   :has() selector targets the outer .card when its OWN toggle button
+   is collapsed AND hovered — direct-child path prevents a nested
+   sub-card's hover from bleeding up to its parent group. */
+.collapsible-card--card:has(> .collapsible-card-header > .collapsible-card-toggle[aria-expanded="false"]:hover) {
   background: var(--bg-elevated);
   border-color: var(--accent);
 }

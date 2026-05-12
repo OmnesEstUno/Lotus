@@ -20,7 +20,10 @@ export default function ArchivedCard() {
   }
 
   return (
-    <CollapsibleCard title="Archived Transactions">
+    <CollapsibleCard
+      title="Archived Transactions"
+      headerExtra={<span className="text-xs text-muted">{archived.length} archived</span>}
+    >
       <p className="text-muted text-sm" style={{ marginBottom: 12 }}>
         Hidden from charts and aggregates but still counted in your total.
       </p>

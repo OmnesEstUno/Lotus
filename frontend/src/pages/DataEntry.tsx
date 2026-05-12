@@ -372,16 +372,23 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
         setParseErrors([]);
         setSkippedCount(0);
         const anyAdded = addedTxns + addedIncome > 0;
-        // Brief pause so the success message is visible, then close the modal
-        setTimeout(() => {
-          if (!isMountedRef.current) return;
-          onPendingChange(false);
-          onRequestClose();
-          // Full reload so every page (Dashboard, Settings, etc.) reflects
-          // the new data without each one needing its own onSubmitted hook.
-          // Skip when nothing was added — all rows were duplicates or denied.
-          if (anyAdded) window.location.reload();
-        }, SUCCESS_FLASH_DURATION_MS);
+        if (anyAdded) {
+          // Hard reload after a brief flash so every page (Dashboard, Settings,
+          // etc.) reflects the new data without each one needing its own
+          // onSubmitted hook. The reload itself dismounts the modal — no
+          // onRequestClose call needed, and no isMountedRef gate because we
+          // want this to fire even if a stray re-render unmounted DataEntry
+          // during the flash.
+          setTimeout(() => window.location.reload(), SUCCESS_FLASH_DURATION_MS);
+        } else {
+          // Nothing was added — close the modal politely; the page state is
+          // already correct.
+          setTimeout(() => {
+            if (!isMountedRef.current) return;
+            onPendingChange(false);
+            onRequestClose();
+          }, SUCCESS_FLASH_DURATION_MS);
+        }
       },
       onConflict: async (msg) => {
         // Refresh versions, then surface a user-actionable message

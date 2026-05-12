@@ -30,6 +30,10 @@ import { dialog } from '../utils/dialog';
 interface DataEntryProps {
   onRequestClose: () => void;
   onPendingChange: (pending: boolean) => void;
+  /** Fired when the user successfully submits data without closing the modal —
+   *  lets the underlying page (e.g. Dashboard) refetch while the modal stays
+   *  open so the user can keep importing. */
+  onSubmitSuccess?: () => void;
 }
 
 // NOTE: This file is deliberately large because the CSV upload flow and the
@@ -48,7 +52,7 @@ interface PreviewRow {
   duplicateMatch: DuplicateMatch | null;
 }
 
-export default function DataEntry({ onRequestClose, onPendingChange }: DataEntryProps) {
+export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuccess }: DataEntryProps) {
   // Unmount guard — prevents setTimeout callbacks from firing against an
   // unmounted component if the modal is closed before the flash completes.
   const isMountedRef = useRef(true);
@@ -372,24 +376,14 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
         setPreviewRows([]);
         setParseErrors([]);
         setSkippedCount(0);
-        const anyAdded = addedTxns + addedIncome > 0;
-        if (anyAdded) {
-          // Hard reload after a brief flash so every page (Dashboard, Settings,
-          // etc.) reflects the new data without each one needing its own
-          // onSubmitted hook. The reload itself dismounts the modal — no
-          // onRequestClose call needed, and no isMountedRef gate because we
-          // want this to fire even if a stray re-render unmounted DataEntry
-          // during the flash.
-          setTimeout(() => window.location.reload(), SUCCESS_FLASH_DURATION_MS);
-        } else {
-          // Nothing was added — close the modal politely; the page state is
-          // already correct.
-          setTimeout(() => {
-            if (!isMountedRef.current) return;
-            onPendingChange(false);
-            onRequestClose();
-          }, SUCCESS_FLASH_DURATION_MS);
-        }
+        // Nothing pending anymore — the preview was just consumed. Clearing
+        // this lets the user dismiss the modal without the "discard pending
+        // changes?" confirm dialog.
+        onPendingChange(false);
+        // Refresh the underlying page (Dashboard's onSubmitted listener) so
+        // when the user closes the modal they see fresh data. The modal
+        // stays open so they can keep importing.
+        if (addedTxns + addedIncome > 0) onSubmitSuccess?.();
       },
       onConflict: async (msg) => {
         // Refresh versions, then surface a user-actionable message

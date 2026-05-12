@@ -71,6 +71,7 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
         <DataEntry
           onRequestClose={handleRequestClose}
           onPendingChange={setHasPending}
+          onSubmitSuccess={notifySubmitted}
         />
       </Modal>
     </DataEntryContext.Provider>

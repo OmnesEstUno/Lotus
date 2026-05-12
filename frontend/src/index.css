@@ -1839,9 +1839,13 @@ a:hover { color: var(--accent-hover); }
   font-size: 24px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: transform 200ms ease-out;
+  transition: transform 200ms ease-in-out;
 }
-.collapsible-card:has(.collapsible-card-toggle[aria-expanded="true"]) .collapsible-card-chevron {
+/* Sibling combinator: the chevron is the toggle's later sibling inside
+   .collapsible-card-header, so each chevron only rotates with its own
+   toggle. A descendant selector would lock every inner chevron rotated
+   the moment the outer group opened. */
+.collapsible-card-toggle[aria-expanded="true"] ~ .collapsible-card-chevron {
   transform: rotate(180deg);
 }
 .collapsible-card-body {
@@ -1852,7 +1856,7 @@ a:hover { color: var(--accent-hover); }
      overflow:hidden) and the header would visually hug the top of the
      card with empty space below it. */
   margin-top: 0;
-  transition: grid-template-rows 200ms ease-out, margin-top 200ms ease-out;
+  transition: grid-template-rows 220ms ease-in-out, margin-top 220ms ease-in-out;
 }
 .collapsible-card-body[data-open="true"] {
   grid-template-rows: 1fr;
@@ -1861,10 +1865,16 @@ a:hover { color: var(--accent-hover); }
 .collapsible-card-body-inner {
   overflow: hidden;
   min-height: 0;
+  opacity: 0;
+  transition: opacity 180ms ease-in-out;
+}
+.collapsible-card-body[data-open="true"] .collapsible-card-body-inner {
+  opacity: 1;
 }
 
 /* Reduce-motion: snap, don't glide. */
 [data-reduce-motion="on"] .collapsible-card-body,
+[data-reduce-motion="on"] .collapsible-card-body-inner,
 [data-reduce-motion="on"] .collapsible-card-chevron {
   transition: none;
 }

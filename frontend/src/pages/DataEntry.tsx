@@ -371,11 +371,16 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
         setPreviewRows([]);
         setParseErrors([]);
         setSkippedCount(0);
+        const anyAdded = addedTxns + addedIncome > 0;
         // Brief pause so the success message is visible, then close the modal
         setTimeout(() => {
           if (!isMountedRef.current) return;
           onPendingChange(false);
           onRequestClose();
+          // Full reload so every page (Dashboard, Settings, etc.) reflects
+          // the new data without each one needing its own onSubmitted hook.
+          // Skip when nothing was added — all rows were duplicates or denied.
+          if (anyAdded) window.location.reload();
         }, SUCCESS_FLASH_DURATION_MS);
       },
       onConflict: async (msg) => {

@@ -1751,7 +1751,10 @@ export default {
         // instead of N×upsertInYear, which exhausts the subrequest budget on
         // large CSV imports.
         await saveTransactions(env.FINANCE_KV, instanceId, [...existing, ...added]);
-        return respond({ added: added.length, skipped }, 200, cors);
+        // Return the new version so the client can advance its expectedVersion
+        // for chunked imports — without this, the second 500-row chunk of a
+        // large CSV would 409 because saveTransactions bumped the index.
+        return respond({ added: added.length, skipped, version: currentVersion + 1 }, 200, cors);
       }
 
       // ── DELETE transaction ──

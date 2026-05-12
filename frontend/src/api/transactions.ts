@@ -1,5 +1,5 @@
 import { Transaction } from '../types';
-import { request, lastKnownVersion, getVersionedList } from './core';
+import { request, lastKnownVersion, rememberVersion, getVersionedList } from './core';
 
 // ─── Transactions ────────────────────────────────────────────────────────────
 
@@ -24,10 +24,17 @@ export async function addTransactions(
   if (expectedVersion === undefined) {
     throw new Error('Cannot add transactions without first fetching them.');
   }
-  return request('/api/transactions', {
-    method: 'POST',
-    body: JSON.stringify({ transactions, expectedVersion }),
-  });
+  const result = await request<{ added: number; skipped: number; version?: number }>(
+    '/api/transactions',
+    {
+      method: 'POST',
+      body: JSON.stringify({ transactions, expectedVersion }),
+    },
+  );
+  // Advance the cached version so the next chunk of a multi-batch CSV
+  // import doesn't 409 against the version the previous chunk just bumped.
+  if (typeof result.version === 'number') rememberVersion('transactions', result.version);
+  return { added: result.added, skipped: result.skipped };
 }
 
 export type TransactionUpdate = Partial<Pick<Transaction, 'date' | 'description' | 'category' | 'amount' | 'notes' | 'archived'>>;

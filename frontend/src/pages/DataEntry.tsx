@@ -24,6 +24,7 @@ import { useWorkspaces } from '../hooks/useWorkspaces';
 import CategorySelect, { NEW_CATEGORY_SENTINEL } from '../components/CategorySelect';
 import DuplicateStatusCell, { DuplicateStatus } from '../components/data-entry/DuplicateStatusCell';
 import LotusSpinner from '../components/LotusSpinner';
+import CollapsibleCard from '../components/CollapsibleCard';
 import { dialog } from '../utils/dialog';
 
 interface DataEntryProps {
@@ -806,17 +807,14 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
         </div>
 
         {/* ── Manual Entry ── */}
-        <div className="card">
-          <div className="card-header">
-            <h2>Manual Entry</h2>
-            <div className="tabs">
-              <button className={`tab ${manualTab === 'expense' ? 'active' : ''}`} onClick={() => setManualTab('expense')}>
-                Expense
-              </button>
-              <button className={`tab ${manualTab === 'income' ? 'active' : ''}`} onClick={() => setManualTab('income')}>
-                Income / Pay Stub
-              </button>
-            </div>
+        <CollapsibleCard title="Manual Entry" defaultOpen={false}>
+          <div className="tabs" style={{ marginBottom: 'var(--space-3)' }}>
+            <button className={`tab ${manualTab === 'expense' ? 'active' : ''}`} onClick={() => setManualTab('expense')}>
+              Expense
+            </button>
+            <button className={`tab ${manualTab === 'income' ? 'active' : ''}`} onClick={() => setManualTab('income')}>
+              Income / Pay Stub
+            </button>
           </div>
 
           {manualTab === 'expense' && (
@@ -1018,7 +1016,7 @@ export default function DataEntry({ onRequestClose, onPendingChange }: DataEntry
               </form>
             </>
           )}
-        </div>
+        </CollapsibleCard>
     </div>
   );
 }

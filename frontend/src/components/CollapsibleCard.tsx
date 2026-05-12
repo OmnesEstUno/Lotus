@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 
 interface Props {
   title: string;
@@ -61,46 +61,6 @@ export default function CollapsibleCard({
     onOpenChange?.(next);
   };
 
-  // JS-driven height animation: CSS-only `grid-template-rows: 0fr → 1fr`
-  // doesn't transition reliably across browsers (Firefox <134, Safari <16.5,
-  // some Chromium builds), so we set explicit height in px and let the CSS
-  // transition do the rest. After the open transition finishes we hand
-  // height back to `auto` so the card flexes with content changes (e.g.
-  // nested CollapsibleCards expanding inside).
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  const firstRender = useRef(true);
-  useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    if (firstRender.current) {
-      firstRender.current = false;
-      el.style.height = open ? 'auto' : '0px';
-      return;
-    }
-    // Respect reduce-motion: if the computed transition is 0s, snap.
-    const duration = parseFloat(getComputedStyle(el).transitionDuration) || 0;
-    if (duration === 0) {
-      el.style.height = open ? 'auto' : '0px';
-      return;
-    }
-    if (open) {
-      el.style.height = el.scrollHeight + 'px';
-      const onEnd = (e: TransitionEvent) => {
-        if (e.propertyName !== 'height' || e.target !== el) return;
-        el.style.height = 'auto';
-        el.removeEventListener('transitionend', onEnd);
-      };
-      el.addEventListener('transitionend', onEnd);
-      return () => el.removeEventListener('transitionend', onEnd);
-    }
-    // Closing: lock current height, force reflow, then transition to 0
-    el.style.height = el.scrollHeight + 'px';
-    void el.offsetHeight;
-    requestAnimationFrame(() => {
-      if (bodyRef.current) bodyRef.current.style.height = '0px';
-    });
-  }, [open]);
-
   const variantClass = `collapsible-card--${variant}`;
   const toneClass = tone !== 'default' ? `collapsible-card--tone-${tone}` : '';
   const className = ['card', 'collapsible-card', variantClass, toneClass].filter(Boolean).join(' ');
@@ -136,7 +96,7 @@ export default function CollapsibleCard({
           expand_more
         </span>
       </div>
-      <div ref={bodyRef} className="collapsible-card-body" data-open={open}>
+      <div className="collapsible-card-body" data-open={open}>
         <div className="collapsible-card-body-inner">{children}</div>
       </div>
     </div>

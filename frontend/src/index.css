@@ -1839,7 +1839,7 @@ a:hover { color: var(--accent-hover); }
   font-size: 24px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: transform 220ms ease-in-out;
+  transition: transform 200ms ease-in-out;
 }
 /* Sibling combinator: the chevron is the toggle's later sibling inside
    .collapsible-card-header, so each chevron only rotates with its own
@@ -1849,22 +1849,22 @@ a:hover { color: var(--accent-hover); }
   transform: rotate(180deg);
 }
 .collapsible-card-body {
-  /* Height is set + animated imperatively by CollapsibleCard.tsx: 0px
-     ↔ scrollHeight on toggle, then back to `auto` post-open so nested
-     content changes flow naturally. Pure-CSS approaches we tried
-     (`grid-template-rows: 0fr → 1fr`, max-height) either don't animate
-     in some browsers or have visible dead time on close — JS gives an
-     exact target. margin-top is conditional on data-open below so the
-     16px gap doesn't leak into the collapsed state. */
-  overflow: hidden;
-  height: 0;
+  display: grid;
+  grid-template-rows: 0fr;
+  /* margin-top is conditional on data-open below — without that, a 16px
+     margin would leak into the collapsed state (margin is NOT clipped by
+     overflow:hidden) and the header would visually hug the top of the
+     card with empty space below it. */
   margin-top: 0;
-  transition: height 220ms ease-in-out, margin-top 220ms ease-in-out;
+  transition: grid-template-rows 220ms ease-in-out, margin-top 220ms ease-in-out;
 }
 .collapsible-card-body[data-open="true"] {
+  grid-template-rows: 1fr;
   margin-top: var(--space-4);
 }
 .collapsible-card-body-inner {
+  overflow: hidden;
+  min-height: 0;
   opacity: 0;
   transition: opacity 180ms ease-in-out;
 }

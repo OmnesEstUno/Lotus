@@ -2096,6 +2096,12 @@ a:hover { color: var(--accent-hover); }
   color: var(--accent-fg);
   fill: currentColor;
   margin-bottom: 2px;
+  /* Material Symbols rendering at the 5px stripe size — font is variable
+     and clamped via font-size; line-height: 1 to avoid extra vertical box. */
+  font-size: 5px;
+  line-height: 1;
+  font-variation-settings: 'opsz' 20, 'wght' 500, 'FILL' 1;
+  overflow: hidden;
 }
 .edge-stripe-bar {
   position: relative;

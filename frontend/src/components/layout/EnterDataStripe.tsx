@@ -24,20 +24,12 @@ export default function EnterDataStripe() {
       aria-haspopup="dialog"
       aria-expanded={isOpen}
     >
-      <svg
-        className="edge-stripe-glyph"
-        viewBox="0 0 24 24"
+      <span
+        className="edge-stripe-glyph material-symbols-outlined"
         aria-hidden="true"
       >
-        {/* Document-with-plus glyph — matches the existing FAB icon shape. */}
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
-        <path
-          d="M12 12v6M9 15h6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-      </svg>
+        note_add
+      </span>
       <span className="edge-stripe-bar" aria-hidden="true" />
     </button>
   );

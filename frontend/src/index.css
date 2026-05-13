@@ -2044,7 +2044,7 @@ a:hover { color: var(--accent-hover); }
   .edge-stripe {
     position: fixed;
     width: 8px;
-    height: 60px;
+    height: 120px;
     border: none;
     padding: 4px 0 3px;
     cursor: pointer;
@@ -2113,15 +2113,22 @@ a:hover { color: var(--accent-hover); }
 [data-handedness="right"] .edge-stripe::after { right: 0; }
 [data-handedness="left"]  .edge-stripe::after { left: 0;  }
 
-/* Workspace stripe — uses --stripe-color (workspace color). Position stacked
-   above Enter Data. */
+/* Workspace stripe (top of the pair) and Enter Data stripe (below it) are
+   sized 120px tall and the pair is centered vertically within the bottom half
+   of the viewport. Center of the pair sits at 25vh from the bottom
+   (= 75vh from top). With a 16px gap between them:
+     stack height = 120 + 16 + 120 = 256px
+     stack midpoint = 25vh from bottom
+     workspace bottom = 25vh + 16/2 = calc(25vh + 8px)
+     enter-data bottom = 25vh - (120 + 16/2) = calc(25vh - 128px)
+   max(16px, ...) on enter-data clamps to viewport bottom on very short
+   screens (<~512px tall) where calc would otherwise produce a negative. */
 .edge-stripe--workspace {
-  bottom: 92px;
+  bottom: calc(25vh + 8px);
 }
 
-/* Enter Data stripe — accent color, anchored to bottom, below Workspace. */
 .edge-stripe--enter-data {
-  bottom: 16px;
+  bottom: max(16px, calc(25vh - 128px));
 }
 .edge-stripe--enter-data::before {
   background: linear-gradient(

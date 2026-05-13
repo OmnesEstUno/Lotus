@@ -119,7 +119,7 @@ function corsHeaders(origin: string | null, allowedOrigin: string): Record<strin
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Instance-Id',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',

@@ -2029,3 +2029,84 @@ a:hover { color: var(--accent-hover); }
   border-radius: var(--radius-md);
   margin-top: var(--space-3);
 }
+
+/* ─── EdgePanel ─────────────────────────────────────────────────────────── */
+.edge-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: var(--z-modal-backdrop);
+}
+.edge-panel {
+  position: fixed;
+  top: 12px;
+  bottom: 12px;
+  background: rgba(24, 24, 27, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-modal);
+  overflow: hidden;
+  animation-duration: 220ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+.edge-panel::before {
+  /* The inner-edge gradient — color comes from --edge-panel-accent set inline. */
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--edge-panel-accent) 16%,
+    var(--edge-panel-accent) 84%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+.edge-panel--left {
+  left: 0;
+  border-radius: 0 12px 12px 0;
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.4);
+  animation-name: edge-panel-slide-in-left;
+}
+.edge-panel--left::before { right: 0; }
+.edge-panel--right {
+  right: 0;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+  animation-name: edge-panel-slide-in-right;
+}
+.edge-panel--right::before { left: 0; }
+
+/* Handedness flip: under data-handedness="left" on mobile, swap the side. */
+@media (max-width: 639px) {
+  [data-handedness="left"] .edge-panel--right {
+    right: auto;
+    left: 0;
+    border-radius: 0 12px 12px 0;
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.4);
+    animation-name: edge-panel-slide-in-left;
+  }
+  [data-handedness="left"] .edge-panel--right::before {
+    left: auto;
+    right: 0;
+  }
+}
+
+@keyframes edge-panel-slide-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes edge-panel-slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+[data-reduce-motion="on"] .edge-panel { animation: none; }

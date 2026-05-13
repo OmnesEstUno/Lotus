@@ -31,8 +31,7 @@ export interface EdgePanelProps {
   children: ReactNode;
 }
 
-const SWIPE_BACK_THRESHOLD = 80;       // px outward drag to dismiss
-const SWIPE_BACK_FLING_VELOCITY = 0.5; // px/ms
+const SWIPE_BACK_FLING_VELOCITY = 0.5; // px/ms — release-velocity threshold for fling-close
 const ANIMATION_DURATION_MS = 220;     // matches CSS .edge-panel transition
 
 export default function EdgePanel({
@@ -170,8 +169,10 @@ export default function EdgePanel({
 
       setInternalIsDragging(false);
 
-      if (outward > SWIPE_BACK_THRESHOLD || velocity > SWIPE_BACK_FLING_VELOCITY) {
-        const pw = panelRef.current?.offsetWidth ?? 300;
+      const pw = panelRef.current?.offsetWidth ?? 300;
+      // Close if dragged past the panel's halfway point, or if released with
+      // enough outward velocity. Matches the open-drag controller's threshold.
+      if (outward > pw / 2 || velocity > SWIPE_BACK_FLING_VELOCITY) {
         setInternalDragOffset(pw);
         window.setTimeout(() => {
           onClose();
@@ -210,9 +211,14 @@ export default function EdgePanel({
 
   if (!open) return null;
 
-  // Resolve effective drag state: external props take priority over internal.
-  const effOffset = dragOffset !== undefined ? dragOffset : internalDragOffset;
-  const effDragging = isDragging !== undefined ? isDragging : internalIsDragging;
+  // Resolve effective drag state. Either source may drive the transform —
+  // external props (an open-drag from the stripe controller) take priority
+  // when they're active (i.e., dragOffset is a number), otherwise fall back
+  // to the panel's internal close-drag state. The earlier "external defined"
+  // check was wrong because parents always pass `dragOffset={null}` during
+  // idle state, which masked internalDragOffset during close-drags.
+  const effOffset = dragOffset ?? internalDragOffset;
+  const effDragging = isDragging === true || internalIsDragging;
 
   const handleBackdrop = onBackdropClose ?? onClose;
 

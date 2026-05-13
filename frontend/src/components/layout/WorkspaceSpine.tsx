@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { colorForId } from '../../utils/workspaceColor';
+import { storage } from '../../utils/storage';
 import EdgePanel from './EdgePanel';
 import WorkspacePanelBody from './WorkspacePanelBody';
 
@@ -16,9 +17,9 @@ export default function WorkspaceSpine() {
   const [pulse, setPulse] = useState(false);
   useEffect(() => {
     if (instances.length < 2) return;
-    if (localStorage.getItem('lotus.spine-onboarded')) return;
+    if (storage.get('lotus.spine-onboarded')) return;
     setPulse(true);
-    localStorage.setItem('lotus.spine-onboarded', '1');
+    storage.set('lotus.spine-onboarded', '1');
     const t = window.setTimeout(() => setPulse(false), 420);
     return () => window.clearTimeout(t);
   }, [instances.length]);

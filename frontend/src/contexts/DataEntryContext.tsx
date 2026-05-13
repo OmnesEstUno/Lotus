@@ -84,7 +84,9 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
           accentColor="var(--accent)"
           ariaLabel="Enter data"
         >
-          {dataEntry}
+          <div className="edge-panel-data-entry">
+            {dataEntry}
+          </div>
         </EdgePanel>
       ) : (
         <Modal

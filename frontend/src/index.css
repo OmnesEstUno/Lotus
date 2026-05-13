@@ -2193,3 +2193,28 @@ a:hover { color: var(--accent-hover); }
     right: 8px;
   }
 }
+
+/* ─── Data Entry inside EdgePanel (mobile) ──────────────────────────────── */
+/* Defaults for right-anchored panel (right-handed mobile):
+   - 16px outer-edge padding (right)
+   - 20px inner-edge padding (left) — clears the 3px gradient and the close button (32px wide + 8px gap)
+   - 48px top padding — clears the close button so the title isn't underneath
+   - 16px bottom padding for breathing room
+   - vertically scrollable so long forms don't stretch the panel */
+.edge-panel-data-entry {
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 48px 16px 16px 20px;
+}
+/* Left-anchored (used on desktop, but desktop renders the Modal instead — this is a safety net). */
+.edge-panel--left .edge-panel-data-entry {
+  padding: 48px 20px 16px 16px;
+}
+/* Left-handed mobile flips a right-anchored panel to the left edge → swap left/right padding so
+   the gradient + close button (now on the right) get the wider 20px clearance. */
+@media (max-width: 639px) {
+  [data-handedness="left"] .edge-panel--right .edge-panel-data-entry {
+    padding: 48px 20px 16px 16px;
+  }
+}

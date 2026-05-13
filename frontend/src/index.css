@@ -1919,6 +1919,13 @@ a:hover { color: var(--accent-hover); }
   padding: 14px 18px 14px 14px;
 }
 @media (max-width: 639px) {
+  /* Mobile right-anchored panel: close button at top-LEFT (inner edge)
+     overlaps the title. Push title down. */
+  .edge-panel--right .workspace-panel-body {
+    padding-top: 48px;
+  }
+  /* Mobile left-handed: panel flips to the left edge, close moves to top-RIGHT.
+     Restore the original padding (which also re-flips left/right padding). */
   [data-handedness="left"] .edge-panel--right .workspace-panel-body {
     padding: 14px 14px 14px 18px;
   }

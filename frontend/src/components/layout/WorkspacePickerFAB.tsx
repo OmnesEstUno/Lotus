@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
-
-// Generate a stable color per workspace by hashing the id; mirrors the look
-// of category dots elsewhere in the app.
-function colorForId(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}, 60%, 55%)`;
-}
+import { colorForId } from '../../utils/workspaceColor';
 
 export default function WorkspacePickerFAB() {
   const { instances, activeInstanceId, switchTo } = useWorkspaces();

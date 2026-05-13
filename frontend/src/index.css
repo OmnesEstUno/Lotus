@@ -2195,3 +2195,49 @@ a:hover { color: var(--accent-hover); }
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* ─── Workspace spine (desktop) ─────────────────────────────────────────── */
+.workspace-spine {
+  display: none;
+}
+@media (min-width: 640px) {
+  .workspace-spine {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: sticky;
+    top: 56px;
+    height: calc(100vh - 56px);
+    width: 16px;                /* invisible 16px hit zone */
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+.workspace-spine-stripe {
+  display: block;
+  width: 4px;
+  height: 76%;                  /* the visible 4px stripe, vertically inset */
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--spine-color) 16%,
+    var(--spine-color) 84%,
+    transparent 100%
+  );
+  overflow: hidden;
+  transition: width 0.2s ease, filter 0.2s ease;
+}
+.workspace-spine:hover .workspace-spine-stripe,
+.workspace-spine:focus-visible .workspace-spine-stripe {
+  width: 8px;
+  filter: brightness(1.3);
+}
+.workspace-spine:focus-visible {
+  outline: none;
+}
+[data-reduce-motion="on"] .workspace-spine-stripe { transition: none; }

@@ -2318,3 +2318,17 @@ a:hover { color: var(--accent-hover); }
 .edge-stripe--workspace {
   bottom: 92px;
 }
+
+/* Enter Data stripe — accent color, anchored to bottom, below Workspace. */
+.edge-stripe--enter-data {
+  bottom: 16px;
+}
+.edge-stripe--enter-data::before {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--accent) 12%,
+    var(--accent) 88%,
+    transparent 100%
+  );
+}

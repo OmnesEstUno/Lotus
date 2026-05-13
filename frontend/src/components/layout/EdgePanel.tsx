@@ -20,7 +20,7 @@ export interface EdgePanelProps {
   /**
    * External drag offset (px from fully-open). 0 = open, panelWidth = closed.
    * Provided by a stripe's drag controller during open-drag. When provided,
-   * the panel tracks this value instead of rendering via the slide-in animation.
+   * the panel tracks this value.
    */
   dragOffset?: number | null;
   /**
@@ -33,7 +33,7 @@ export interface EdgePanelProps {
 
 const SWIPE_BACK_THRESHOLD = 80;       // px outward drag to dismiss
 const SWIPE_BACK_FLING_VELOCITY = 0.5; // px/ms
-const ANIMATION_DURATION_MS = 220;     // matches the CSS transition used for drag settle
+const ANIMATION_DURATION_MS = 220;     // matches CSS .edge-panel transition
 
 export default function EdgePanel({
   open, onClose, onBackdropClose,
@@ -46,6 +46,34 @@ export default function EdgePanel({
   // Internal close-swipe state (user swiping the open panel back to dismiss).
   const [internalDragOffset, setInternalDragOffset] = useState<number | null>(null);
   const [internalIsDragging, setInternalIsDragging] = useState(false);
+
+  // Slide-in state: if no external drag is initiating this mount, start the
+  // panel off-screen and transition to translateX(0) on the next frame.
+  // This replaces the CSS @keyframes-based slide-in (which had a re-trigger
+  // bug when inline `animation: none` was removed after a drag commit).
+  const [mountSlide, setMountSlide] = useState<'off' | 'on' | null>(() => {
+    if (typeof window === 'undefined') return null;
+    // If a drag is initiating the mount, skip the slide-in entirely —
+    // dragOffset drives the position from the start.
+    if (dragOffset != null || isDragging) return null;
+    return 'off';
+  });
+
+  // On mount, if we started in 'off' state, advance to 'on' on the next frame
+  // so the CSS transition fires from off-screen to translateX(0).
+  useEffect(() => {
+    if (mountSlide !== 'off') return;
+    const id = requestAnimationFrame(() => {
+      setMountSlide('on');
+      // After the transition, clear the inline override so the panel rests
+      // at its default transform.
+      window.setTimeout(() => setMountSlide(null), ANIMATION_DURATION_MS + 16);
+    });
+    return () => cancelAnimationFrame(id);
+    // Run once on mount; mountSlide's lazy initializer already captured the
+    // correct starting state from the props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function effectiveSide(): 'left' | 'right' {
     if (side !== 'right') return side;
@@ -78,7 +106,9 @@ export default function EdgePanel({
     };
   }, [open, onClose]);
 
-  // Native touch listeners for internal close-swipe (non-passive touchmove so we can preventDefault).
+  // Native touch listeners for internal close-swipe (non-passive touchmove so
+  // we can preventDefault). Re-attaches when `dragOffset` flips between
+  // null/non-null so the guard inside onTouchStart stays current.
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
@@ -96,12 +126,18 @@ export default function EdgePanel({
 
     const onTouchMove = (e: TouchEvent) => {
       if (!dragState.active) return;
+      // Always preventDefault while the drag is active so the browser
+      // (iOS back-swipe etc.) never claims the gesture mid-flight.
+      e.preventDefault();
       const dx = e.touches[0].clientX - dragState.startX;
       const eff = effectiveSide();
-      // "outward" = away from the interior of the screen, toward the screen edge.
+      // "outward" = away from the interior, toward the screen edge.
       const outward = eff === 'right' ? dx : -dx;
-      if (outward <= 0) return;
-      e.preventDefault();
+      if (outward <= 0) {
+        // Pulling the other way — don't translate, but keep the gesture
+        // active in case the user reverses.
+        return;
+      }
       setInternalIsDragging(true);
       setInternalDragOffset(outward);
     };
@@ -118,7 +154,6 @@ export default function EdgePanel({
       setInternalIsDragging(false);
 
       if (outward > SWIPE_BACK_THRESHOLD || velocity > SWIPE_BACK_FLING_VELOCITY) {
-        // Commit dismiss: animate to panelWidth then call onClose.
         const pw = panelRef.current?.offsetWidth ?? 300;
         setInternalDragOffset(pw);
         window.setTimeout(() => {
@@ -126,7 +161,6 @@ export default function EdgePanel({
           setInternalDragOffset(null);
         }, ANIMATION_DURATION_MS);
       } else {
-        // Cancel: animate back to 0 then clear.
         setInternalDragOffset(0);
         window.setTimeout(() => setInternalDragOffset(null), ANIMATION_DURATION_MS);
       }
@@ -151,7 +185,6 @@ export default function EdgePanel({
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchCancel);
     };
-    // dragOffset in deps so the guard inside onTouchStart stays current.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, onClose, dragOffset]);
 
@@ -163,14 +196,30 @@ export default function EdgePanel({
 
   const handleBackdrop = onBackdropClose ?? onClose;
 
+  // Build the inline transform. Priority:
+  //   1. Active drag (external or internal) — track the offset.
+  //   2. Mount slide-in 'off' state — pin to off-screen (no transition).
+  //   3. Otherwise — no inline transform; default 0 + CSS transition.
+  let transformValue: string | undefined;
+  let transitionValue: string | undefined;
+  if (effOffset != null) {
+    transformValue = `translateX(${effOffset}px)`;
+    transitionValue = effDragging ? 'none' : `transform ${ANIMATION_DURATION_MS}ms ease-out`;
+  } else if (mountSlide === 'off') {
+    // First paint: off-screen, no transition (browser won't animate from
+    // here yet because the value hasn't changed). Next frame, mountSlide
+    // flips to 'on' and we drop the inline transform — the CSS transition
+    // on the cascade animates from this off-screen value back to 0.
+    transformValue = `translateX(${effectiveSide() === 'right' ? '100%' : '-100%'})`;
+    transitionValue = 'none';
+  }
+
   const style: CSSProperties = {
     width,
     ['--edge-panel-accent' as never]: accentColor,
-    ...(effOffset != null ? {
-      transform: `translateX(${effOffset}px)`,
-      transition: effDragging ? 'none' : `transform ${ANIMATION_DURATION_MS}ms ease-out`,
-      animation: 'none',
-    } : {}),
+    ...(transformValue != null
+      ? { transform: transformValue, ...(transitionValue ? { transition: transitionValue } : {}) }
+      : {}),
   };
 
   return (

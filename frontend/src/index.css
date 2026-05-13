@@ -1846,9 +1846,10 @@ a:hover { color: var(--accent-hover); }
   flex-direction: column;
   z-index: var(--z-modal);
   overflow: hidden;
-  animation-duration: 220ms;
-  animation-timing-function: ease-out;
-  animation-fill-mode: both;
+  transition: transform 220ms ease-out;
+  /* Allow vertical scroll inside the panel, but block horizontal gestures so
+     iOS edge-swipe and other browser gestures don't pre-empt our close-drag. */
+  touch-action: pan-y;
 }
 .edge-panel::before {
   /* The inner-edge gradient — color comes from --edge-panel-accent set inline. */
@@ -1870,14 +1871,12 @@ a:hover { color: var(--accent-hover); }
   left: 0;
   border-radius: 0 12px 12px 0;
   box-shadow: 8px 0 24px rgba(0, 0, 0, 0.4);
-  animation-name: edge-panel-slide-in-left;
 }
 .edge-panel--left::before { right: 0; }
 .edge-panel--right {
   right: 0;
   border-radius: 12px 0 0 12px;
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
-  animation-name: edge-panel-slide-in-right;
 }
 .edge-panel--right::before { left: 0; }
 
@@ -1888,7 +1887,6 @@ a:hover { color: var(--accent-hover); }
     left: 0;
     border-radius: 0 12px 12px 0;
     box-shadow: 8px 0 24px rgba(0, 0, 0, 0.4);
-    animation-name: edge-panel-slide-in-left;
   }
   [data-handedness="left"] .edge-panel--right::before {
     left: auto;
@@ -1896,16 +1894,9 @@ a:hover { color: var(--accent-hover); }
   }
 }
 
-@keyframes edge-panel-slide-in-left {
-  from { transform: translateX(-100%); }
-  to   { transform: translateX(0); }
+[data-reduce-motion="on"] .edge-panel {
+  transition: none;
 }
-@keyframes edge-panel-slide-in-right {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
-}
-
-[data-reduce-motion="on"] .edge-panel { animation: none; }
 
 /* ─── Workspace panel body ──────────────────────────────────────────────── */
 .workspace-panel-body {

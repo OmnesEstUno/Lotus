@@ -4,8 +4,9 @@ import { useCurrentUser } from '../../hooks/useCurrentUser';
 import { useDisplayName } from '../../hooks/useDisplayName';
 import { useDataEntry } from '../../contexts/DataEntryContext';
 import Logo from '../Logo';
-import WorkspaceTabs from './WorkspaceTabs';
-import WorkspacePickerFAB from './WorkspacePickerFAB';
+import WorkspaceSpine from './WorkspaceSpine';
+import WorkspaceStripe from './WorkspaceStripe';
+import EnterDataStripe from './EnterDataStripe';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,6 +26,8 @@ export default function Layout({ children }: LayoutProps) {
 
   const path = location.pathname;
   const onSettings = path === '/settings';
+  const onDashboard = path === '/dashboard';
+  const showFabs = currentUser && (onDashboard || onSettings);
 
   return (
     <>
@@ -73,30 +76,38 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </nav>
         <div className="main-content-wrapper">
-          {currentUser && path !== '/settings' && <WorkspaceTabs />}
+          {currentUser && onDashboard && <WorkspaceSpine />}
           <main className="main-content-inner">
             <div className="container">{children}</div>
           </main>
         </div>
       </div>
-      {currentUser && (path === '/dashboard' || path === '/settings') && (
-        <div className="fab-stack">
-          <button
-            type="button"
-            className="fab-enter-data"
-            onClick={openModal}
-            aria-label="Enter Data"
-          >
-            <span className="fab-enter-data-label">Enter Data</span>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="12" y1="18" x2="12" y2="12" />
-              <line x1="9" y1="15" x2="15" y2="15" />
-            </svg>
-          </button>
-          <WorkspacePickerFAB />
-        </div>
+      {showFabs && (
+        <>
+          {/* Desktop-only: keep the existing circular Enter Data FAB on the right.
+              CSS hides this on viewports <640px. */}
+          <div className="fab-stack">
+            <button
+              type="button"
+              className="fab-enter-data"
+              onClick={openModal}
+              aria-label="Enter Data"
+            >
+              <span className="fab-enter-data-label">Enter Data</span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="12" y1="18" x2="12" y2="12" />
+                <line x1="9" y1="15" x2="15" y2="15" />
+              </svg>
+            </button>
+          </div>
+          {/* Mobile-only: the two edge stripes. CSS hides these on viewports ≥640px.
+              Workspace stripe shown only on Dashboard; Enter Data stripe shown on
+              both Dashboard and Settings to match the desktop FAB scope. */}
+          {onDashboard && <WorkspaceStripe />}
+          <EnterDataStripe />
+        </>
       )}
     </>
   );

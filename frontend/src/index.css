@@ -1680,18 +1680,13 @@ a:hover { color: var(--accent-hover); }
   z-index: var(--z-sticky);
   align-items: flex-end;
 }
-[data-handedness="right"] .fab-stack { right: 24px; align-items: flex-end; }
-[data-handedness="left"]  .fab-stack { left: 24px; align-items: flex-start; }
+/* Desktop: always anchored to the bottom-right, ignoring handedness. */
+.fab-stack { right: 24px; align-items: flex-end; }
 
+/* Mobile: hide the desktop FAB stack — the edge stripes take over. */
 @media (max-width: 639px) {
-  .fab-stack { bottom: 16px; }
-  [data-handedness="right"] .fab-stack { right: 16px; }
-  [data-handedness="left"]  .fab-stack { left: 16px; }
+  .fab-stack { display: none; }
 }
-
-/* Workspace popover anchors to the side that matches the FAB position */
-[data-handedness="right"] .workspace-picker-list { right: 0; align-items: flex-end; }
-[data-handedness="left"]  .workspace-picker-list { left: 0;  align-items: flex-start; }
 
 /* ─── Accessibility: reduce motion ───────────────────────────────────────── */
 [data-reduce-motion="on"] *,

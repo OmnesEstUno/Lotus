@@ -9,7 +9,7 @@ import { useEdgeSwipe } from '../../hooks/useEdgeSwipe';
  * rendered inside an EdgePanel on mobile).
  */
 export default function EnterDataStripe() {
-  const { open } = useDataEntry();
+  const { isOpen, open } = useDataEntry();
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEdgeSwipe(buttonRef, { onTrigger: open });
@@ -22,6 +22,7 @@ export default function EnterDataStripe() {
       onClick={open}
       aria-label="Enter data"
       aria-haspopup="dialog"
+      aria-expanded={isOpen}
     >
       <svg
         className="edge-stripe-glyph"

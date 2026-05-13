@@ -2147,8 +2147,49 @@ a:hover { color: var(--accent-hover); }
 .edge-stripe--pulse {
   animation: edge-stripe-pulse 400ms ease-out;
 }
+@media (max-width: 639px) {
+  [data-handedness="left"] .edge-stripe--pulse {
+    /* Mirror the box-shadow so the glow extends inward (rightward) instead of off-screen. */
+    animation-name: edge-stripe-pulse-left;
+  }
+  @keyframes edge-stripe-pulse-left {
+    0%   { filter: brightness(1);   box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+    50%  { filter: brightness(1.9); box-shadow: 2px 0 12px 2px var(--stripe-color); }
+    100% { filter: brightness(1);   box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+  }
+}
 
 [data-reduce-motion="on"] .workspace-spine--pulse .workspace-spine-stripe,
 [data-reduce-motion="on"] .edge-stripe--pulse {
   animation: none;
+}
+
+.edge-panel-close {
+  position: absolute;
+  top: 8px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0;
+  z-index: 1;
+}
+.edge-panel-close:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+/* Place the close button on the side opposite the inner-edge gradient. */
+.edge-panel--left .edge-panel-close { right: 8px; }
+.edge-panel--right .edge-panel-close { left: 8px; }
+@media (max-width: 639px) {
+  [data-handedness="left"] .edge-panel--right .edge-panel-close {
+    left: auto;
+    right: 8px;
+  }
 }

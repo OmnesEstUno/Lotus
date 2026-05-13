@@ -2241,3 +2241,80 @@ a:hover { color: var(--accent-hover); }
   outline: none;
 }
 [data-reduce-motion="on"] .workspace-spine-stripe { transition: none; }
+
+/* ─── Mobile edge stripes (shared) ──────────────────────────────────────── */
+.edge-stripe {
+  display: none;
+}
+@media (max-width: 639px) {
+  .edge-stripe {
+    position: fixed;
+    width: 8px;
+    height: 60px;
+    border: none;
+    padding: 4px 0 3px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border-radius: 6px 0 0 6px;
+    overflow: hidden;
+    z-index: var(--z-sticky);
+    background: transparent;
+  }
+  [data-handedness="right"] .edge-stripe { right: 0; }
+  [data-handedness="left"]  .edge-stripe {
+    left: 0;
+    right: auto;
+    border-radius: 0 6px 6px 0;
+  }
+}
+.edge-stripe::before {
+  /* Gradient body — color comes from --stripe-color set inline. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--stripe-color) 12%,
+    var(--stripe-color) 88%,
+    transparent 100%
+  );
+  border-radius: inherit;
+  pointer-events: none;
+}
+.edge-stripe-glyph {
+  position: relative;
+  z-index: 1;
+  width: 5px;
+  height: 5px;
+  color: var(--accent-fg);
+  fill: currentColor;
+  margin-bottom: 2px;
+}
+.edge-stripe-bar {
+  position: relative;
+  z-index: 1;
+  width: 2px;
+  flex: 1;
+  background: rgba(15, 15, 26, 0.3);
+  border-radius: 999px;
+}
+/* Invisible 44px-wide touch target — extends inward from the stripe. */
+.edge-stripe::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  bottom: -10px;
+  width: 44px;
+}
+[data-handedness="right"] .edge-stripe::after { right: 0; }
+[data-handedness="left"]  .edge-stripe::after { left: 0;  }
+
+/* Workspace stripe — uses --stripe-color (workspace color). Position stacked
+   above Enter Data. */
+.edge-stripe--workspace {
+  bottom: 92px;
+}

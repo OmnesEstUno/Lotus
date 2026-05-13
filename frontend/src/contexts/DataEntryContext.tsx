@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Modal from '../components/Modal';
+import EdgePanel from '../components/layout/EdgePanel';
 import DataEntry from '../pages/DataEntry';
 import { dialog } from '../utils/dialog';
+import { useIsNarrow } from '../hooks/useIsNarrow';
 
 interface DataEntryContextValue {
   isOpen: boolean;
@@ -27,6 +29,7 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hasPending, setHasPending] = useState(false);
   const submittedListeners = useRef<Set<() => void>>(new Set());
+  const isMobile = useIsNarrow();
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => {
@@ -60,20 +63,38 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
 
   const value: DataEntryContextValue = { isOpen, open, close, onSubmitted };
 
+  const dataEntry = (
+    <DataEntry
+      onRequestClose={handleRequestClose}
+      onPendingChange={setHasPending}
+      onSubmitSuccess={notifySubmitted}
+    />
+  );
+
   return (
     <DataEntryContext.Provider value={value}>
       {children}
-      <Modal
-        open={isOpen}
-        onClose={handleClose}
-        onBackdropClose={handleBackdropClose}
-      >
-        <DataEntry
-          onRequestClose={handleRequestClose}
-          onPendingChange={setHasPending}
-          onSubmitSuccess={notifySubmitted}
-        />
-      </Modal>
+      {isMobile ? (
+        <EdgePanel
+          open={isOpen}
+          onClose={handleClose}
+          onBackdropClose={handleBackdropClose}
+          side="right"
+          width="92%"
+          accentColor="var(--accent)"
+          ariaLabel="Enter data"
+        >
+          {dataEntry}
+        </EdgePanel>
+      ) : (
+        <Modal
+          open={isOpen}
+          onClose={handleClose}
+          onBackdropClose={handleBackdropClose}
+        >
+          {dataEntry}
+        </Modal>
+      )}
     </DataEntryContext.Provider>
   );
 }

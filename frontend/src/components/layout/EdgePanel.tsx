@@ -172,7 +172,7 @@ export default function EdgePanel({
       const pw = panelRef.current?.offsetWidth ?? 300;
       // Close if dragged past the panel's halfway point, or if released with
       // enough outward velocity. Matches the open-drag controller's threshold.
-      if (outward > pw / 2 || velocity > SWIPE_BACK_FLING_VELOCITY) {
+      if (outward > pw / 4 || velocity > SWIPE_BACK_FLING_VELOCITY) {
         setInternalDragOffset(pw);
         window.setTimeout(() => {
           onClose();

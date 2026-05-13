@@ -11,6 +11,8 @@ interface DataEntryContextValue {
   open: () => void;
   close: () => void;
   onSubmitted: (fn: () => void) => () => void;
+  setDragOffset: (v: number | null) => void;
+  setIsDragging: (v: boolean) => void;
 }
 
 const DataEntryContext = createContext<DataEntryContextValue | null>(null);
@@ -30,6 +32,11 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
   const [hasPending, setHasPending] = useState(false);
   const submittedListeners = useRef<Set<() => void>>(new Set());
   const isMobile = useIsNarrow();
+
+  const [dragOffset, setDragOffsetState] = useState<number | null>(null);
+  const [isDragging, setIsDraggingState] = useState(false);
+  const setDragOffset = useCallback((v: number | null) => setDragOffsetState(v), []);
+  const setIsDragging = useCallback((v: boolean) => setIsDraggingState(v), []);
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => {
@@ -61,7 +68,9 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
     notifySubmitted();
   }, [close, notifySubmitted]);
 
-  const value: DataEntryContextValue = { isOpen, open, close, onSubmitted };
+  const value: DataEntryContextValue = {
+    isOpen, open, close, onSubmitted, setDragOffset, setIsDragging,
+  };
 
   const dataEntry = (
     <DataEntry
@@ -76,13 +85,15 @@ export function DataEntryProvider({ children }: DataEntryProviderProps) {
       {children}
       {isMobile ? (
         <EdgePanel
-          open={isOpen}
+          open={isOpen || dragOffset != null}
           onClose={handleClose}
           onBackdropClose={handleBackdropClose}
           side="right"
           width="92%"
           accentColor="var(--accent)"
           ariaLabel="Enter data"
+          dragOffset={dragOffset}
+          isDragging={isDragging}
         >
           <div className="edge-panel-data-entry">
             {dataEntry}

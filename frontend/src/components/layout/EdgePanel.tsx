@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 export interface EdgePanelProps {
@@ -17,22 +17,37 @@ export interface EdgePanelProps {
   accentColor: string;
   /** Used as the accessible name on the panel's role="dialog" element. */
   ariaLabel: string;
+  /**
+   * External drag offset (px from fully-open). 0 = open, panelWidth = closed.
+   * Provided by a stripe's drag controller during open-drag. When provided,
+   * the panel tracks this value instead of rendering via the slide-in animation.
+   */
+  dragOffset?: number | null;
+  /**
+   * Whether the external drag is actively in progress. When true, transition is
+   * suppressed so the panel tracks the finger exactly.
+   */
+  isDragging?: boolean;
   children: ReactNode;
 }
 
-const SWIPE_BACK_THRESHOLD = 80;     // px outward drag to dismiss
+const SWIPE_BACK_THRESHOLD = 80;       // px outward drag to dismiss
 const SWIPE_BACK_FLING_VELOCITY = 0.5; // px/ms
+const ANIMATION_DURATION_MS = 220;     // matches the CSS transition used for drag settle
 
 export default function EdgePanel({
   open, onClose, onBackdropClose,
-  side, width, accentColor, ariaLabel, children,
+  side, width, accentColor, ariaLabel,
+  dragOffset, isDragging,
+  children,
 }: EdgePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ x: number; t: number; delta: number } | null>(null);
+
+  // Internal close-swipe state (user swiping the open panel back to dismiss).
+  const [internalDragOffset, setInternalDragOffset] = useState<number | null>(null);
+  const [internalIsDragging, setInternalIsDragging] = useState(false);
 
   function effectiveSide(): 'left' | 'right' {
-    // Mobile CSS flips side="right" to the left edge under data-handedness="left".
-    // The flip is the SAME @media query EdgePanel's CSS uses (max-width: 639px).
     if (side !== 'right') return side;
     if (typeof window === 'undefined') return side;
     const isNarrow = window.matchMedia('(max-width: 639px)').matches;
@@ -41,6 +56,7 @@ export default function EdgePanel({
     return handedness === 'left' ? 'left' : 'right';
   }
 
+  // Keyboard / focus / body-scroll effect (unchanged behaviour).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -48,7 +64,6 @@ export default function EdgePanel({
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    // Focus the first focusable inside the panel.
     const root = panelRef.current;
     if (root) {
       const first = root.querySelector<HTMLElement>(
@@ -63,45 +78,99 @@ export default function EdgePanel({
     };
   }, [open, onClose]);
 
-  function handleTouchStart(e: React.TouchEvent) {
-    if (e.touches.length !== 1) return;
-    dragRef.current = { x: e.touches[0].clientX, t: Date.now(), delta: 0 };
-  }
-  function handleTouchMove(e: React.TouchEvent) {
-    const d = dragRef.current;
-    if (!d) return;
-    const dx = e.touches[0].clientX - d.x;
-    // Outward = toward the edge the panel came from.
-    // Right-anchored panel → outward = +X (rightward)
-    // Left-anchored panel  → outward = -X (leftward)
-    const eff = effectiveSide();
-    const outward = eff === 'right' ? dx : -dx;
-    d.delta = outward;
-    // Apply a transient drag offset for tactile feedback.
-    if (panelRef.current && outward > 0) {
-      panelRef.current.style.transform =
-        `translateX(${eff === 'right' ? outward : -outward}px)`;
-    }
-  }
-  function handleTouchEnd() {
-    const d = dragRef.current;
-    if (!d) return;
-    const elapsed = Date.now() - d.t;
-    const velocity = elapsed > 0 ? d.delta / elapsed : 0;
-    if (panelRef.current) panelRef.current.style.transform = '';
-    dragRef.current = null;
-    if (d.delta > SWIPE_BACK_THRESHOLD || velocity > SWIPE_BACK_FLING_VELOCITY) {
-      onClose();
-    }
-  }
+  // Native touch listeners for internal close-swipe (non-passive touchmove so we can preventDefault).
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+
+    const dragState = { startX: 0, startT: 0, active: false };
+
+    const onTouchStart = (e: TouchEvent) => {
+      // If the stripe's open-drag is in progress, don't start a close-drag.
+      if (dragOffset != null) return;
+      if (e.touches.length !== 1) return;
+      dragState.startX = e.touches[0].clientX;
+      dragState.startT = Date.now();
+      dragState.active = true;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!dragState.active) return;
+      const dx = e.touches[0].clientX - dragState.startX;
+      const eff = effectiveSide();
+      // "outward" = away from the interior of the screen, toward the screen edge.
+      const outward = eff === 'right' ? dx : -dx;
+      if (outward <= 0) return;
+      e.preventDefault();
+      setInternalIsDragging(true);
+      setInternalDragOffset(outward);
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!dragState.active) return;
+      dragState.active = false;
+      const elapsed = Date.now() - dragState.startT;
+      const dx = e.changedTouches[0].clientX - dragState.startX;
+      const eff = effectiveSide();
+      const outward = eff === 'right' ? dx : -dx;
+      const velocity = elapsed > 0 ? outward / elapsed : 0;
+
+      setInternalIsDragging(false);
+
+      if (outward > SWIPE_BACK_THRESHOLD || velocity > SWIPE_BACK_FLING_VELOCITY) {
+        // Commit dismiss: animate to panelWidth then call onClose.
+        const pw = panelRef.current?.offsetWidth ?? 300;
+        setInternalDragOffset(pw);
+        window.setTimeout(() => {
+          onClose();
+          setInternalDragOffset(null);
+        }, ANIMATION_DURATION_MS);
+      } else {
+        // Cancel: animate back to 0 then clear.
+        setInternalDragOffset(0);
+        window.setTimeout(() => setInternalDragOffset(null), ANIMATION_DURATION_MS);
+      }
+    };
+
+    const onTouchCancel = () => {
+      if (!dragState.active) return;
+      dragState.active = false;
+      setInternalIsDragging(false);
+      setInternalDragOffset(0);
+      window.setTimeout(() => setInternalDragOffset(null), ANIMATION_DURATION_MS);
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchCancel);
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchCancel);
+    };
+    // dragOffset in deps so the guard inside onTouchStart stays current.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, onClose, dragOffset]);
 
   if (!open) return null;
 
+  // Resolve effective drag state: external props take priority over internal.
+  const effOffset = dragOffset !== undefined ? dragOffset : internalDragOffset;
+  const effDragging = isDragging !== undefined ? isDragging : internalIsDragging;
+
   const handleBackdrop = onBackdropClose ?? onClose;
+
   const style: CSSProperties = {
     width,
-    // Custom property consumed by .edge-panel::before for the gradient color.
     ['--edge-panel-accent' as never]: accentColor,
+    ...(effOffset != null ? {
+      transform: `translateX(${effOffset}px)`,
+      transition: effDragging ? 'none' : `transform ${ANIMATION_DURATION_MS}ms ease-out`,
+      animation: 'none',
+    } : {}),
   };
 
   return (
@@ -118,9 +187,6 @@ export default function EdgePanel({
         aria-modal="true"
         aria-label={ariaLabel}
         onClick={(e) => e.stopPropagation()}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       >
         <button
           type="button"

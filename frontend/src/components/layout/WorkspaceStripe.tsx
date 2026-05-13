@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { colorForId } from '../../utils/workspaceColor';
-import { useEdgeSwipe } from '../../hooks/useEdgeSwipe';
+import { useStripeDragController } from '../../hooks/useStripeDragController';
 import { storage } from '../../utils/storage';
 import EdgePanel from './EdgePanel';
 import WorkspacePanelBody from './WorkspacePanelBody';
+
+const PANEL_WIDTH = 138;
 
 /**
  * Mobile workspace stripe — 8px-wide gradient stripe flush against the
@@ -16,6 +18,15 @@ export default function WorkspaceStripe() {
   const { instances, activeInstanceId } = useWorkspaces();
   const [open, setOpen] = useState(false);
   const [pulse, setPulse] = useState(false);
+
+  const handleCommit = useCallback(() => setOpen(true), []);
+  const handleCancel = useCallback(() => {}, []);
+  const { attachRef, dragOffset, isDragging } = useStripeDragController({
+    panelWidth: PANEL_WIDTH,
+    onCommit: handleCommit,
+    onCancel: handleCancel,
+  });
+
   useEffect(() => {
     if (instances.length < 2) return;
     if (storage.get('lotus.spine-onboarded')) return;
@@ -24,21 +35,18 @@ export default function WorkspaceStripe() {
     const t = window.setTimeout(() => setPulse(false), 420);
     return () => window.clearTimeout(t);
   }, [instances.length]);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-
-  const handleOpen = useCallback(() => setOpen(true), []);
-  useEdgeSwipe(buttonRef, { onTrigger: handleOpen });
 
   if (instances.length < 2) return null;
 
   const active = instances.find((i) => i.id === activeInstanceId);
   const color = active ? colorForId(active.id) : 'var(--accent)';
   const style: CSSProperties = { ['--stripe-color' as never]: color };
+  const showPanel = open || isDragging || dragOffset != null;
 
   return (
     <>
       <button
-        ref={buttonRef}
+        ref={attachRef}
         type="button"
         className={`edge-stripe edge-stripe--workspace${pulse ? ' edge-stripe--pulse' : ''}`}
         style={style}
@@ -55,16 +63,20 @@ export default function WorkspaceStripe() {
         </span>
         <span className="edge-stripe-bar" aria-hidden="true" />
       </button>
-      <EdgePanel
-        open={open}
-        onClose={() => setOpen(false)}
-        side="right"
-        width="138px"
-        accentColor={color}
-        ariaLabel="Workspaces"
-      >
-        <WorkspacePanelBody onDone={() => setOpen(false)} />
-      </EdgePanel>
+      {showPanel && (
+        <EdgePanel
+          open
+          onClose={() => setOpen(false)}
+          side="right"
+          width={`${PANEL_WIDTH}px`}
+          accentColor={color}
+          ariaLabel="Workspaces"
+          dragOffset={dragOffset}
+          isDragging={isDragging}
+        >
+          <WorkspacePanelBody onDone={() => setOpen(false)} />
+        </EdgePanel>
+      )}
     </>
   );
 }

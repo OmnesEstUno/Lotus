@@ -27,3 +27,6 @@ npm-debug.log*
 # Superpowers brainstorm specs / plans — local working docs
 docs/superpowers/
 .superpowers/
+
+# Git worktrees — local-only isolated workspaces
+.worktrees/

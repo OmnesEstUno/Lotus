@@ -74,6 +74,7 @@ export interface Instance {
   createdAt: string;
   /** Optimistic-concurrency version.  Legacy records default to 0. */
   version: number;
+  color?: string;
 }
 
 export type TimeRange = 'week' | 'month' | '3month' | 'year' | 'custom';

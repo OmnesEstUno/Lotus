@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
-import { colorForId } from '../../utils/workspaceColor';
+import { useWorkspaceColor } from '../../hooks/useWorkspaceColor';
 import { storage } from '../../utils/storage';
 import EdgePanel from './EdgePanel';
 import WorkspacePanelBody from './WorkspacePanelBody';
@@ -24,10 +24,10 @@ export default function WorkspaceSpine() {
     return () => window.clearTimeout(t);
   }, [instances.length]);
 
-  if (instances.length < 2) return null;
+  const active = instances.find((i) => i.id === activeInstanceId) ?? null;
+  const color = useWorkspaceColor(active);
 
-  const active = instances.find((i) => i.id === activeInstanceId);
-  const color = active ? colorForId(active.id) : 'var(--accent)';
+  if (instances.length < 2) return null;
   const style: CSSProperties = { ['--spine-color' as never]: color };
 
   return (

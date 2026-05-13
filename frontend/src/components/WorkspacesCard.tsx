@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useWorkspaces } from '../hooks/useWorkspaces';
 import { useCurrentUser } from '../hooks/useCurrentUser';
+import { useWorkspaceColor } from '../hooks/useWorkspaceColor';
 import CollapsibleCard from './CollapsibleCard';
 import {
   createInstance,
@@ -15,9 +16,11 @@ import {
   deleteWorkspaceInvite,
 } from '../api/invites';
 import type { WorkspaceInviteSummary } from '../api/invites';
+import type { Instance } from '../types';
 import { runMutation } from '../utils/mutation';
 import { UNIX_MS_MULTIPLIER } from '../utils/constants';
 import { dialog } from '../utils/dialog';
+import WorkspaceColorPicker from './WorkspaceColorPicker';
 
 function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
   const [invites, setInvites] = useState<WorkspaceInviteSummary[]>([]);
@@ -119,11 +122,39 @@ function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
   );
 }
 
+interface PickerState { instance: Instance; rect: DOMRect; }
+
+function WorkspaceCardDot({
+  instance, isOwner, onEdit,
+}: {
+  instance: Instance;
+  isOwner: boolean;
+  onEdit: (rect: DOMRect) => void;
+}) {
+  const color = useWorkspaceColor(instance);
+  if (!isOwner) {
+    return <span className="workspace-card-dot" style={{ background: color }} aria-hidden="true" />;
+  }
+  return (
+    <button
+      type="button"
+      className="workspace-card-dot workspace-card-dot--editable"
+      style={{ background: color }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit((e.currentTarget as HTMLElement).getBoundingClientRect());
+      }}
+      aria-label={`Change color for ${instance.name}`}
+    />
+  );
+}
+
 export default function WorkspacesCard() {
   const { instances, refresh } = useWorkspaces();
   const currentUser = useCurrentUser();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [picker, setPicker] = useState<PickerState | null>(null);
 
   async function handleCreate() {
     const name = await dialog.prompt('Workspace name:');
@@ -238,6 +269,11 @@ export default function WorkspacesCard() {
                 {/* Left: workspace info */}
                 <div className="workspace-tile-body">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <WorkspaceCardDot
+                      instance={inst}
+                      isOwner={isOwner}
+                      onEdit={(rect) => setPicker({ instance: inst, rect })}
+                    />
                     <strong style={{ color: 'var(--text-primary)' }}>{inst.name}</strong>
                     <span
                       style={{
@@ -337,6 +373,14 @@ export default function WorkspacesCard() {
             );
           })}
         </div>
+      )}
+      {picker && (
+        <WorkspaceColorPicker
+          instance={picker.instance}
+          anchorRect={picker.rect}
+          onClose={() => { setPicker(null); void refresh(); }}
+          onConflict={() => { setPicker(null); void refresh(); }}
+        />
       )}
     </CollapsibleCard>
   );

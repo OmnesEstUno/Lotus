@@ -70,6 +70,7 @@ interface Instance {
   createdAt: string;
   /** Optimistic-concurrency version.  Missing on legacy records → treated as 0. */
   version: number;
+  color?: string;
 }
 
 // ─── User profile type ────────────────────────────────────────────────────────
@@ -1458,6 +1459,27 @@ export default {
             return respond({ error: 'Conflict: instance was modified by another request.', currentVersion }, 409, cors);
           }
           inst.name = trimmed;
+          inst.version = currentVersion + 1;
+          await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
+          return respond(inst, 200, cors);
+        }
+
+        // Set instance color (owner only, optimistic concurrency).
+        if ((m = path.match(/^\/api\/instances\/([^/]+)\/color$/)) && method === 'PATCH') {
+          const id = m[1];
+          const body = await request.json() as { color?: string; expectedVersion?: number };
+          const color = (body.color ?? '').trim().toLowerCase();
+          if (!/^#[0-9a-f]{6}$/.test(color)) return respond({ error: 'Color must be a 6-digit hex string (e.g. #a78bfa).' }, 400, cors);
+          if (typeof body.expectedVersion !== 'number') return respond({ error: 'expectedVersion (number) required.' }, 400, cors);
+          const raw = await env.FINANCE_KV.get(instanceMetaKey(id));
+          if (!raw) return respond({ error: 'Not found.' }, 404, cors);
+          const inst = JSON.parse(raw) as Instance;
+          if (inst.owner !== username) return respond({ error: 'Only the owner can change the color.' }, 403, cors);
+          const currentVersion = inst.version ?? 0;
+          if (body.expectedVersion !== currentVersion) {
+            return respond({ error: 'Conflict: instance was modified by another request.', currentVersion }, 409, cors);
+          }
+          inst.color = color;
           inst.version = currentVersion + 1;
           await env.FINANCE_KV.put(instanceMetaKey(id), JSON.stringify(inst));
           return respond(inst, 200, cors);

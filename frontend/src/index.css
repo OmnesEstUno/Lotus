@@ -1940,16 +1940,13 @@ a:hover { color: var(--accent-hover); }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 0;
   border-radius: 999px;
   background: rgba(39, 39, 42, 0.7);
   border: 1px solid transparent;
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  text-align: left;
   min-height: 36px;
   transition: background 0.12s ease, border-color 0.12s ease;
+  overflow: hidden;
 }
 .workspace-panel-pill:hover {
   background: var(--bg-elevated);
@@ -1959,17 +1956,40 @@ a:hover { color: var(--accent-hover); }
   border-color: var(--accent);
   color: var(--accent);
 }
+.workspace-panel-pill--active .workspace-panel-name-btn {
+  color: var(--accent);
+}
 .workspace-panel-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-left: 12px;
+  border: none;
+  padding: 0;
 }
-.workspace-panel-name {
+.workspace-panel-dot--editable {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  transition: transform 0.12s ease;
+}
+.workspace-panel-dot--editable:hover {
+  transform: scale(1.15);
+}
+.workspace-panel-name-btn {
   flex: 1;
+  background: transparent;
+  border: none;
+  padding: 8px 12px 8px 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-height: 36px;
 }
 .workspace-panel-new {
   display: flex;
@@ -2228,4 +2248,48 @@ a:hover { color: var(--accent-hover); }
   [data-handedness="left"] .edge-panel--right .edge-panel-data-entry {
     padding: 48px 20px 16px 16px;
   }
+}
+
+/* ─── Workspace color picker popover ───────────────────────────────────── */
+.workspace-color-picker {
+  position: fixed;
+  z-index: var(--z-modal);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+/* Tighten the react-colorful default sizing inside our card. */
+.workspace-color-picker .react-colorful {
+  width: 100%;
+  height: 180px;
+}
+.workspace-color-picker .react-colorful__saturation {
+  border-radius: var(--radius-md);
+}
+.workspace-color-picker .react-colorful__hue {
+  border-radius: var(--radius-sm);
+  margin-top: 8px;
+  height: 16px;
+}
+
+/* ─── Workspace card dot (Settings page WorkspacesCard) ─────────────────── */
+.workspace-card-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.workspace-card-dot--editable {
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.workspace-card-dot--editable:hover {
+  transform: scale(1.15);
 }

@@ -74,6 +74,19 @@ export async function setActiveInstance(instanceId: string): Promise<void> {
 }
 
 /**
+ * Set the display color of a workspace. Owner-only, optimistic concurrency.
+ * Throws ConflictError on 409.
+ */
+export async function setInstanceColor(id: string, color: string, expectedVersion: number): Promise<Instance> {
+  const inst = await request<Instance>(`/api/instances/${id}/color`, {
+    method: 'PATCH',
+    body: JSON.stringify({ color, expectedVersion }),
+  });
+  notifyInstancesChanged();
+  return inst;
+}
+
+/**
  * Transfer ownership of a workspace to another existing member. Owner-only.
  * Requires a fresh version (`getInstances()` first). Throws ConflictError on 409.
  */

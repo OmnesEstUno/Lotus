@@ -113,7 +113,10 @@ export default function EdgePanel({
     const el = panelRef.current;
     if (!el) return;
 
-    const dragState = { startX: 0, startT: 0, active: false };
+    // `started` = touchstart fired. `dragging` = movement passed the threshold
+    // and we're actively following the finger. Mirrors the open-drag controller.
+    const dragState = { startX: 0, startT: 0, started: false, dragging: false };
+    const MOVEMENT_THRESHOLD = 8;
 
     const onTouchStart = (e: TouchEvent) => {
       // If the stripe's open-drag is in progress, don't start a close-drag.
@@ -121,30 +124,44 @@ export default function EdgePanel({
       if (e.touches.length !== 1) return;
       dragState.startX = e.touches[0].clientX;
       dragState.startT = Date.now();
-      dragState.active = true;
+      dragState.started = true;
+      dragState.dragging = false;
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (!dragState.active) return;
-      // Always preventDefault while the drag is active so the browser
-      // (iOS back-swipe etc.) never claims the gesture mid-flight.
-      e.preventDefault();
+      if (!dragState.started) return;
       const dx = e.touches[0].clientX - dragState.startX;
       const eff = effectiveSide();
       // "outward" = away from the interior, toward the screen edge.
       const outward = eff === 'right' ? dx : -dx;
-      if (outward <= 0) {
-        // Pulling the other way — don't translate, but keep the gesture
-        // active in case the user reverses.
-        return;
+
+      if (!dragState.dragging) {
+        // Wait for the user to commit to a drag before claiming the gesture.
+        // Matches the open-drag controller's 8px threshold.
+        if (outward < MOVEMENT_THRESHOLD) return;
+        dragState.dragging = true;
+        setInternalIsDragging(true);
       }
-      setInternalIsDragging(true);
-      setInternalDragOffset(outward);
+
+      // Claim the gesture so the browser doesn't (iOS back-swipe etc.).
+      e.preventDefault();
+
+      // Follow the finger in both directions; clamp to >= 0 so reversing past
+      // the start point pulls the panel back to fully open rather than letting
+      // it travel "inside" the rest position.
+      setInternalDragOffset(Math.max(0, outward));
     };
 
     const onTouchEnd = (e: TouchEvent) => {
-      if (!dragState.active) return;
-      dragState.active = false;
+      if (!dragState.started) return;
+      const wasDragging = dragState.dragging;
+      dragState.started = false;
+      dragState.dragging = false;
+
+      // If we never crossed the movement threshold, it was a tap on something
+      // inside the panel — leave it alone (no transform to clean up).
+      if (!wasDragging) return;
+
       const elapsed = Date.now() - dragState.startT;
       const dx = e.changedTouches[0].clientX - dragState.startX;
       const eff = effectiveSide();
@@ -167,8 +184,11 @@ export default function EdgePanel({
     };
 
     const onTouchCancel = () => {
-      if (!dragState.active) return;
-      dragState.active = false;
+      if (!dragState.started) return;
+      const wasDragging = dragState.dragging;
+      dragState.started = false;
+      dragState.dragging = false;
+      if (!wasDragging) return;
       setInternalIsDragging(false);
       setInternalDragOffset(0);
       window.setTimeout(() => setInternalDragOffset(null), ANIMATION_DURATION_MS);

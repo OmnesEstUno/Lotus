@@ -2259,7 +2259,7 @@ a:hover { color: var(--accent-hover); }
     flex-direction: column;
     align-items: center;
     border-radius: 6px 0 0 6px;
-    overflow: hidden;
+    overflow: visible;
     z-index: var(--z-sticky);
     background: transparent;
   }

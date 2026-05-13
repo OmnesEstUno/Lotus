@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { colorForId } from '../../utils/workspaceColor';
@@ -16,7 +16,8 @@ export default function WorkspaceStripe() {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  useEdgeSwipe(buttonRef, { onTrigger: () => setOpen(true) });
+  const handleOpen = useCallback(() => setOpen(true), []);
+  useEdgeSwipe(buttonRef, { onTrigger: handleOpen });
 
   if (instances.length < 2) return null;
 

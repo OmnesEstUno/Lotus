@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { colorForId } from '../../utils/workspaceColor';
@@ -14,6 +14,15 @@ import WorkspacePanelBody from './WorkspacePanelBody';
 export default function WorkspaceStripe() {
   const { instances, activeInstanceId } = useWorkspaces();
   const [open, setOpen] = useState(false);
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (instances.length < 2) return;
+    if (localStorage.getItem('lotus.spine-onboarded')) return;
+    setPulse(true);
+    localStorage.setItem('lotus.spine-onboarded', '1');
+    const t = window.setTimeout(() => setPulse(false), 420);
+    return () => window.clearTimeout(t);
+  }, [instances.length]);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const handleOpen = useCallback(() => setOpen(true), []);
@@ -30,7 +39,7 @@ export default function WorkspaceStripe() {
       <button
         ref={buttonRef}
         type="button"
-        className="edge-stripe edge-stripe--workspace"
+        className={`edge-stripe edge-stripe--workspace${pulse ? ' edge-stripe--pulse' : ''}`}
         style={style}
         onClick={() => setOpen(true)}
         aria-label="Switch workspace"

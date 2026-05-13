@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { colorForId } from '../../utils/workspaceColor';
@@ -13,6 +13,15 @@ import WorkspacePanelBody from './WorkspacePanelBody';
 export default function WorkspaceSpine() {
   const { instances, activeInstanceId } = useWorkspaces();
   const [open, setOpen] = useState(false);
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (instances.length < 2) return;
+    if (localStorage.getItem('lotus.spine-onboarded')) return;
+    setPulse(true);
+    localStorage.setItem('lotus.spine-onboarded', '1');
+    const t = window.setTimeout(() => setPulse(false), 420);
+    return () => window.clearTimeout(t);
+  }, [instances.length]);
 
   if (instances.length < 2) return null;
 
@@ -24,7 +33,7 @@ export default function WorkspaceSpine() {
     <>
       <button
         type="button"
-        className="workspace-spine"
+        className={`workspace-spine${pulse ? ' workspace-spine--pulse' : ''}`}
         style={style}
         onClick={() => setOpen(true)}
         aria-label="Switch workspace"

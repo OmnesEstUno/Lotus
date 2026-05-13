@@ -2110,3 +2110,88 @@ a:hover { color: var(--accent-hover); }
 }
 
 [data-reduce-motion="on"] .edge-panel { animation: none; }
+
+/* ─── Workspace panel body ──────────────────────────────────────────────── */
+.workspace-panel-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px 14px 14px 18px;
+  gap: 6px;
+}
+.edge-panel--right .workspace-panel-body {
+  padding: 14px 18px 14px 14px;
+}
+@media (max-width: 639px) {
+  [data-handedness="left"] .edge-panel--right .workspace-panel-body {
+    padding: 14px 14px 14px 18px;
+  }
+}
+.workspace-panel-title {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-secondary);
+  margin: 0 0 4px 4px;
+  font-weight: var(--font-weight-semibold);
+}
+.workspace-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  overflow-y: auto;
+}
+.workspace-panel-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(39, 39, 42, 0.7);
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-align: left;
+  min-height: 36px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.workspace-panel-pill:hover {
+  background: var(--bg-elevated);
+}
+.workspace-panel-pill--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.workspace-panel-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.workspace-panel-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-panel-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  margin-top: 8px;
+  min-height: 36px;
+}
+.workspace-panel-new:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}

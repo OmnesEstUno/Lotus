@@ -1967,14 +1967,34 @@ a:hover { color: var(--accent-hover); }
   margin-left: 12px;
   border: none;
   padding: 0;
+  /* For the non-owner span, no background is set in CSS — it comes from
+     the inline style prop. */
 }
+/* When the dot is editable, the `<button>` is a 32px touch target with
+   the visible 16px swatch centered inside it. */
 .workspace-panel-dot--editable {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
   cursor: pointer;
+  flex-shrink: 0;
+  margin-left: 4px;       /* offset so the visible swatch lines up at ~12px from the pill edge */
+  padding: 0;
+  border-radius: 50%;
+  -webkit-tap-highlight-color: transparent;
+}
+.workspace-panel-dot-inner {
+  display: block;
   width: 16px;
   height: 16px;
+  border-radius: 50%;
   transition: transform 0.12s ease;
 }
-.workspace-panel-dot--editable:hover {
+.workspace-panel-dot--editable:hover .workspace-panel-dot-inner {
   transform: scale(1.15);
 }
 .workspace-panel-name-btn {
@@ -2280,16 +2300,32 @@ a:hover { color: var(--accent-hover); }
   height: 14px;
   border-radius: 50%;
   flex-shrink: 0;
-  border: none;
-  padding: 0;
   display: inline-block;
   margin-right: 8px;
   vertical-align: middle;
 }
 .workspace-card-dot--editable {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
   cursor: pointer;
+  padding: 0;
+  margin-right: 2px;
+  border-radius: 50%;
+  vertical-align: middle;
+  -webkit-tap-highlight-color: transparent;
+}
+.workspace-card-dot-inner {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
   transition: transform 0.12s ease;
 }
-.workspace-card-dot--editable:hover {
+.workspace-card-dot--editable:hover .workspace-card-dot-inner {
   transform: scale(1.15);
 }

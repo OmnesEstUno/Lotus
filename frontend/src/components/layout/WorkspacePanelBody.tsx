@@ -2,10 +2,11 @@ import { useRef, useState } from 'react';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
 import { useWorkspaceColor } from '../../hooks/useWorkspaceColor';
-import { createInstance } from '../../api/instances';
+import { createInstance, setInstanceColor } from '../../api/instances';
 import { dialog } from '../../utils/dialog';
 import type { Instance } from '../../types';
 import WorkspaceColorPicker from '../WorkspaceColorPicker';
+import { setPendingColor } from '../../utils/pendingColors';
 
 interface WorkspacePanelBodyProps {
   onDone: () => void;
@@ -66,8 +67,23 @@ export default function WorkspacePanelBody({ onDone }: WorkspacePanelBodyProps) 
         <WorkspaceColorPicker
           instance={picker.instance}
           anchorRect={picker.rect}
-          onClose={() => { setPicker(null); void refresh(); }}
-          onConflict={() => { setPicker(null); void refresh(); }}
+          onCommit={async (finalColor) => {
+            const target = picker.instance;
+            setPicker(null);
+            try {
+              await setInstanceColor(target.id, finalColor, target.version);
+              await refresh();
+            } catch (err) {
+              await refresh();
+            } finally {
+              setPendingColor(target.id, null);
+            }
+          }}
+          onCancel={() => {
+            const target = picker.instance;
+            setPicker(null);
+            setPendingColor(target.id, null);
+          }}
         />
       )}
     </div>
@@ -100,10 +116,15 @@ function WorkspacePanelPill({ instance, active, isOwner, onPick, onEditColor }: 
           ref={dotRef as React.RefObject<HTMLButtonElement>}
           type="button"
           className="workspace-panel-dot workspace-panel-dot--editable"
-          style={{ background: color }}
           onClick={handleDotClick}
           aria-label={`Change color for ${instance.name}`}
-        />
+        >
+          <span
+            className="workspace-panel-dot-inner"
+            style={{ background: color }}
+            aria-hidden="true"
+          />
+        </button>
       ) : (
         <span
           ref={dotRef as React.RefObject<HTMLSpanElement>}

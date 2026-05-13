@@ -9,6 +9,7 @@ import {
   deleteInstance,
   removeInstanceMember,
   transferOwnership,
+  setInstanceColor,
 } from '../api/instances';
 import {
   createWorkspaceInvite,
@@ -21,6 +22,7 @@ import { runMutation } from '../utils/mutation';
 import { UNIX_MS_MULTIPLIER } from '../utils/constants';
 import { dialog } from '../utils/dialog';
 import WorkspaceColorPicker from './WorkspaceColorPicker';
+import { setPendingColor } from '../utils/pendingColors';
 
 function WorkspaceInvitesPanel({ instanceId }: { instanceId: string }) {
   const [invites, setInvites] = useState<WorkspaceInviteSummary[]>([]);
@@ -139,13 +141,18 @@ function WorkspaceCardDot({
     <button
       type="button"
       className="workspace-card-dot workspace-card-dot--editable"
-      style={{ background: color }}
       onClick={(e) => {
         e.stopPropagation();
         onEdit((e.currentTarget as HTMLElement).getBoundingClientRect());
       }}
       aria-label={`Change color for ${instance.name}`}
-    />
+    >
+      <span
+        className="workspace-card-dot-inner"
+        style={{ background: color }}
+        aria-hidden="true"
+      />
+    </button>
   );
 }
 
@@ -378,8 +385,23 @@ export default function WorkspacesCard() {
         <WorkspaceColorPicker
           instance={picker.instance}
           anchorRect={picker.rect}
-          onClose={() => { setPicker(null); void refresh(); }}
-          onConflict={() => { setPicker(null); void refresh(); }}
+          onCommit={async (finalColor) => {
+            const target = picker.instance;
+            setPicker(null);
+            try {
+              await setInstanceColor(target.id, finalColor, target.version);
+              await refresh();
+            } catch (err) {
+              await refresh();
+            } finally {
+              setPendingColor(target.id, null);
+            }
+          }}
+          onCancel={() => {
+            const target = picker.instance;
+            setPicker(null);
+            setPendingColor(target.id, null);
+          }}
         />
       )}
     </CollapsibleCard>

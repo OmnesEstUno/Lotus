@@ -1,84 +1,93 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { HexColorPicker } from 'react-colorful';
 import type { Instance } from '../types';
-import { setInstanceColor } from '../api/instances';
 import { setPendingColor } from '../utils/pendingColors';
 import { colorForInstance } from '../utils/workspaceColor';
-import { runMutation } from '../utils/mutation';
 
 interface WorkspaceColorPickerProps {
   /** Workspace being edited. */
   instance: Instance;
-  /** Where to render — provide the bounding rect of the trigger dot. */
+  /** Bounding rect of the trigger dot in viewport coords. */
   anchorRect: DOMRect;
-  /** Called after persisting (success or error). The parent unmounts the picker. */
-  onClose: () => void;
-  /** Called when the persist hits a conflict so the parent can refresh. */
-  onConflict?: (message: string) => void;
+  /** Called when the user clicks outside the picker. Receives the final color
+   *  the user picked. The parent is responsible for: unmounting the picker,
+   *  persisting the color, refreshing, and clearing the pending color. */
+  onCommit: (finalColor: string) => void;
+  /** Called when the picker should close without committing (e.g. Escape).
+   *  Parent unmounts and clears pending. */
+  onCancel: () => void;
 }
 
-const PICKER_WIDTH = 200;
-const PICKER_HEIGHT = 220;
-const VIEWPORT_PADDING = 8;
+const PICKER_WIDTH = 220;
+const PICKER_HEIGHT = 240;
+const VIEWPORT_PADDING = 12;
 
 export default function WorkspaceColorPicker({
-  instance, anchorRect, onClose, onConflict,
+  instance, anchorRect, onCommit, onCancel,
 }: WorkspaceColorPickerProps) {
-  // Hex color — react-colorful's HexColorPicker returns "#rrggbb" strings.
-  // Initialize from the resolved color (persisted or hash-derived).
   const initial = colorForInstance(instance);
   const [color, setColor] = useState<string>(() => normalizeHex(initial));
   const rootRef = useRef<HTMLDivElement>(null);
   const closingRef = useRef(false);
+  // Track whether onCommit/onCancel has fired so the unmount cleanup doesn't
+  // double-clear or step on the parent's pending-color lifecycle.
+  const terminatedRef = useRef(false);
 
-  // Push the live color to the pending bus on every change so all consumers
-  // (spine, stripes, dots) update in real time.
+  // Live-preview: push the draft to the pending bus on every change.
   useEffect(() => {
     setPendingColor(instance.id, color);
-    return () => {
-      // On unmount, clear the pending so the persisted color (or hash) takes
-      // over. The commit path also clears, but cleanup guards against escape
-      // paths (e.g. parent unmounts before commit).
-      setPendingColor(instance.id, null);
-    };
   }, [instance.id, color]);
 
-  // Persist on click outside.
+  // Safety cleanup: if the picker unmounts WITHOUT going through onCommit
+  // or onCancel (e.g. parent unmount, navigation), clear pending so we
+  // don't leak. The normal paths set terminatedRef = true and rely on the
+  // parent to clear after refresh.
+  useEffect(() => {
+    return () => {
+      if (!terminatedRef.current) {
+        setPendingColor(instance.id, null);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Click-outside → commit. Use pointerdown (instead of click) so the
+  // commit fires before any other element's click handler runs.
   useEffect(() => {
     function onPointerDown(e: PointerEvent) {
       if (!rootRef.current) return;
       if (rootRef.current.contains(e.target as Node)) return;
       if (closingRef.current) return;
       closingRef.current = true;
-      void commit();
+      terminatedRef.current = true;
+      onCommit(color);
     }
-    // Use `pointerdown` (instead of click) so the persist fires before any
-    // other element's click handler runs — important on mobile.
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // `color` is in deps so the captured value is the latest draft on commit.
+  }, [color, onCommit]);
 
-  async function commit() {
-    await runMutation({
-      onStart: () => {},
-      call: () => setInstanceColor(instance.id, color, instance.version),
-      onSuccess: () => {},
-      onConflict: (msg) => onConflict?.(msg),
-      onError: () => {},
-      onFinally: () => {
-        setPendingColor(instance.id, null);
-        onClose();
-      },
-      conflictMessage: 'This workspace was modified by another session. Try again.',
-    });
-  }
+  // Escape → cancel.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      if (closingRef.current) return;
+      closingRef.current = true;
+      terminatedRef.current = true;
+      onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
 
-  // Position the picker near the anchor rect — try below first, fall back to
-  // above if there isn't room. Clamp horizontally to the viewport.
-  const top = Math.min(
-    anchorRect.bottom + 8,
-    window.innerHeight - PICKER_HEIGHT - VIEWPORT_PADDING,
+  // Position the picker near the anchor, clamped to the viewport.
+  const top = Math.max(
+    VIEWPORT_PADDING,
+    Math.min(
+      anchorRect.bottom + 8,
+      window.innerHeight - PICKER_HEIGHT - VIEWPORT_PADDING,
+    ),
   );
   const left = Math.max(
     VIEWPORT_PADDING,
@@ -88,12 +97,11 @@ export default function WorkspaceColorPicker({
     ),
   );
 
-  return (
+  const picker = (
     <div
       ref={rootRef}
       className="workspace-color-picker"
       style={{ top, left, width: PICKER_WIDTH }}
-      // Keep clicks inside from propagating to backdrop-style handlers.
       onPointerDown={(e) => e.stopPropagation()}
       role="dialog"
       aria-label={`Change color for ${instance.name}`}
@@ -101,11 +109,13 @@ export default function WorkspaceColorPicker({
       <HexColorPicker color={color} onChange={setColor} />
     </div>
   );
+
+  // Portal into document.body to escape any ancestor `overflow: hidden`
+  // (notably the EdgePanel on mobile).
+  return createPortal(picker, document.body);
 }
 
 function normalizeHex(c: string): string {
-  // colorForId returns "hsl(h, 60%, 55%)" — react-colorful's HexColorPicker
-  // needs a hex string. Convert HSL → RGB → hex.
   if (c.startsWith('#') && /^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
   const m = c.match(/^hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)$/);
   if (!m) return '#818cf8';

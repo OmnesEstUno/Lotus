@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { startAuthentication } from '@simplewebauthn/browser';
 import {
   getSetupStatus,
@@ -60,6 +60,11 @@ const backButtonStyle: React.CSSProperties = {
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
+  // `/signup` always shows the signup form, even after the system is
+  // initialized — the rest of the file's logic still defers to
+  // `getSetupStatus().initialized` when this is false (the `/login` route).
+  const wantsSignup = location.pathname === '/signup';
   const [step, setStep] = useState<Step>('loading');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -115,6 +120,7 @@ export default function Login() {
       getSetupStatus()
         .then(({ initialized, migrationPending }) => {
           if (migrationPending) setStep('migrate');
+          else if (wantsSignup) setStep('setup-password');
           else setStep(initialized ? 'login-password' : 'setup-password');
         })
         .catch(() => {
@@ -142,6 +148,23 @@ export default function Login() {
       continueToInit();
     }
   }, [navigate]);
+
+  // Respond to in-app navigation between /login and /signup while the
+  // component stays mounted (react-router keeps the same component instance
+  // when navigating between two routes that render it). Only flips between
+  // the two landing steps — mid-flow steps (TOTP, forgot-password, etc.)
+  // are left alone.
+  useEffect(() => {
+    if (step === 'login-password' && wantsSignup) {
+      setStep('setup-password');
+    } else if (step === 'setup-password' && !wantsSignup) {
+      getSetupStatus()
+        .then(({ initialized }) => {
+          if (initialized) setStep('login-password');
+        })
+        .catch(() => { /* keep current step on error */ });
+    }
+  }, [wantsSignup, step]);
 
   useEffect(() => {
     if (step !== 'login-totp') return;
@@ -635,9 +658,9 @@ export default function Login() {
             <button
               type="button"
               className="btn btn-ghost w-full"
-              onClick={() => goBack('login-password')}
+              onClick={() => navigate('/login')}
             >
-              Back to log in
+              Already have an account? Sign in
             </button>
           </form>
         )}
@@ -695,6 +718,13 @@ export default function Login() {
             </div>
             <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
               {loading ? <span className="spinner" /> : 'Continue'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost w-full"
+              onClick={() => navigate('/signup')}
+            >
+              Don't have an account? Create one
             </button>
           </form>
         )}

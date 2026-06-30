@@ -21,7 +21,7 @@ export default function App() {
           <Route path="/workspace-invite" element={<WorkspaceInvitePage />} />
           <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
           <Route path="/settings" element={<ProtectedRoute element={<Settings />} />} />
-          <Route path="*" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
+          <Route path="*" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/signup'} replace />} />
         </Routes>
       </DataEntryProvider>
     </HashRouter>

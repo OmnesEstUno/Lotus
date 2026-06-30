@@ -29,6 +29,7 @@ import Logo from '../components/Logo';
 import LotusSpinner from '../components/LotusSpinner';
 import PasswordInput from '../components/PasswordInput';
 import RateLimitMessage from '../components/RateLimitMessage';
+import TurnstileWidget from '../components/TurnstileWidget';
 import { STORAGE_KEYS, PASSWORD_MIN_LENGTH, USERNAME_REGEX, USERNAME_HINT } from '../utils/constants';
 import { storage, sessionStore } from '../utils/storage';
 
@@ -65,8 +66,8 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [preAuthToken, setPreAuthToken] = useState('');
-  const [inviteToken, setInviteToken] = useState('');
-  const [inviteTokenFromUrl, setInviteTokenFromUrl] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [honeypot, setHoneypot] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasBiometricCreds, setHasBiometricCreds] = useState(false);
@@ -109,19 +110,6 @@ export default function Login() {
       history.replaceState(null, '', window.location.pathname + window.location.search + '#/reset');
       return;
     }
-    // Deep-link: invite (#/signup?token=...)
-    const inviteMatch = hash.match(/[?&]token=([^&]+)/);
-    if (inviteMatch) {
-      let decoded: string;
-      try { decoded = decodeURIComponent(inviteMatch[1]); }
-      catch { return; }
-      setInviteToken(decoded);
-      setInviteTokenFromUrl(true);
-      setStep('setup-password');
-      history.replaceState(null, '', window.location.pathname + window.location.search + '#/signup');
-      return;
-    }
-
     const trustedToken = getTrustedDeviceToken();
     const continueToInit = () => {
       getSetupStatus()
@@ -281,7 +269,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      await initSetup(trimmedUsername, password, inviteToken, displayName.trim() || undefined);
+      await initSetup(trimmedUsername, password, turnstileToken, displayName.trim() || undefined, honeypot);
       setUsername(trimmedUsername);
       // First-login biometric onboarding (modal also surfaces optional TOTP).
       storage.set(STORAGE_KEYS.BIOMETRIC_PROMPT_PENDING, '1');
@@ -562,22 +550,6 @@ export default function Login() {
             <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: 8 }}>
               Create a username and password to protect your financial data. You can add biometric and authenticator-app sign-in from Settings after you log in.
             </p>
-            {!inviteTokenFromUrl && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="setup-invite-token">Invite token</label>
-                <input
-                  id="setup-invite-token"
-                  name="invite-token"
-                  type="text"
-                  className="input"
-                  value={inviteToken}
-                  onChange={(e) => setInviteToken(e.target.value)}
-                  placeholder="Paste your invite token"
-                  autoComplete="off"
-                  required
-                />
-              </div>
-            )}
             <div className="form-group">
               <label className="form-label" htmlFor="setup-username">Username</label>
               <input
@@ -643,7 +615,21 @@ export default function Login() {
                 passwordrules={`minlength: ${PASSWORD_MIN_LENGTH};`}
               />
             </div>
-            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading}>
+            <TurnstileWidget
+              siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY as string}
+              onToken={setTurnstileToken}
+            />
+            <input
+              type="text"
+              name="website"
+              value={honeypot}
+              onChange={(e) => setHoneypot(e.target.value)}
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              style={{ position: 'absolute', left: -9999, width: 1, height: 1, opacity: 0 }}
+            />
+            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading || !turnstileToken}>
               {loading ? <span className="spinner" /> : 'Continue'}
             </button>
             <button

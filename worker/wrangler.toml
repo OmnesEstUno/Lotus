@@ -20,4 +20,6 @@ RP_ORIGIN = "https://lotus-finance.me"
 #                           After first successful admin creation, this secret
 #                           can be deleted (the endpoint self-disables once
 #                           users:admin:profile exists).
+#   TURNSTILE_SECRET      — Cloudflare Turnstile secret key, verified server-side
+#                           on POST /api/setup/init (open signup).
 # Run `wrangler kv namespace create FINANCE_KV` to create the KV namespace

@@ -21,7 +21,7 @@ import { checkAndIncrement, clearRateLimit } from './auth/rateLimit';
 import { beginRegistration, finishRegistration, listCredentials, getCredential, putCredential, deleteCredential, deleteAllCredentialsForUser, beginAuthentication, finishAuthentication, userHasCredentials } from './auth/webauthn';
 import { rotateTrustedDevice, verifyTrustedDevice, revokeAllTrustedDevicesForUser } from './auth/trustedDevice';
 import { migrateSingleUserToMultiTenant, createDefaultInstance, instanceMetaKey, migrateToYearPartitioned } from './storage/kvMigrations';
-import { createInvite, verifyInvite, markInviteUsed, listInvites, deleteInvite } from './invites/inviteTokens';
+import { createInvite, listInvites, deleteInvite } from './invites/inviteTokens';
 import {
   createPasswordResetToken,
   verifyPasswordResetToken,
@@ -55,6 +55,7 @@ export interface Env {
   ADMIN_INIT_SECRET?: string;   // optional — absence disables /api/admin/init
   RP_ID: string;
   RP_ORIGIN: string;
+  TURNSTILE_SECRET: string;
 }
 
 /** Auth context returned by authenticate(). */
@@ -559,7 +560,7 @@ export default {
 
       // ── Initialize Setup ──
       if (path === '/api/setup/init' && method === 'POST') {
-        const body = await request.json() as { username?: string; password?: string; inviteToken?: string; displayName?: string };
+        const body = await request.json() as { username?: string; password?: string; turnstileToken?: string; website?: string; displayName?: string };
         const username = (body.username ?? '').trim().toLowerCase();
         const displayName = (body.displayName ?? '').trim().slice(0, 64) || undefined;
         if (!/^[a-z0-9_-]{3,32}$/.test(username)) {
@@ -572,14 +573,39 @@ export default {
           return respond({ error: 'Password must be at least 8 characters.' }, 400, cors);
         }
 
-        // Verify invite BEFORE any KV writes for the new user
-        const inviteToken = (body.inviteToken ?? '').trim();
-        if (!inviteToken) {
-          return respond({ error: 'An invite token is required to sign up.' }, 400, cors);
+        // Honeypot — bots fill hidden form fields; humans don't see them.
+        if (typeof body.website === 'string' && body.website.length > 0) {
+          return respond({ error: 'Invalid request.' }, 400, cors);
         }
-        const invite = await verifyInvite(env.FINANCE_KV, inviteToken, env.JWT_SECRET);
-        if (!invite.ok) {
-          return respond({ error: `Invite rejected: ${invite.reason}` }, 400, cors);
+
+        // Per-IP rate limit (5 attempts per hour).
+        const ip = request.headers.get('CF-Connecting-IP') ?? '';
+        const ipKey = ip || 'unknown';
+        const rlKey = `ratelimit:signup:${ipKey}`;
+        const rlRaw = await env.FINANCE_KV.get(rlKey);
+        const rlCount = rlRaw ? Number(rlRaw) : 0;
+        if (rlCount >= 5) {
+          return respond({ error: 'Too many signup attempts from this IP. Try again later.' }, 429, cors);
+        }
+        await env.FINANCE_KV.put(rlKey, String(rlCount + 1), { expirationTtl: 3600 });
+
+        // Turnstile verification.
+        const turnstileToken = (body.turnstileToken ?? '').trim();
+        if (!turnstileToken) {
+          return respond({ error: 'Please complete the human-verification check.' }, 400, cors);
+        }
+        const verifyForm = new URLSearchParams();
+        verifyForm.set('secret', env.TURNSTILE_SECRET ?? '');
+        verifyForm.set('response', turnstileToken);
+        if (ip) verifyForm.set('remoteip', ip);
+        const verifyRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: verifyForm.toString(),
+        });
+        const verifyJson = await verifyRes.json() as { success?: boolean; 'error-codes'?: string[] };
+        if (!verifyJson.success) {
+          return respond({ error: 'Human-verification check failed. Please try again.' }, 400, cors);
         }
 
         const existing = await getUsernames(env.FINANCE_KV);
@@ -597,9 +623,6 @@ export default {
           activeInstanceId: defaultInstance.id,
         };
         await saveUserProfile(env.FINANCE_KV, username, profile);
-
-        const marked = await markInviteUsed(env.FINANCE_KV, invite.id, username);
-        if (!marked) console.warn(`Invite ${invite.id} could not be marked used for ${username} (expired or revoked).`);
 
         await addUsername(env.FINANCE_KV, username);
         await env.FINANCE_KV.put('meta:initialized', 'true');

@@ -32,12 +32,13 @@ export async function getSetupStatus(): Promise<{ initialized: boolean; migratio
 export async function initSetup(
   username: string,
   password: string,
-  inviteToken: string,
+  turnstileToken: string,
   displayName?: string,
+  honeypot?: string,
 ): Promise<{ ok: true; username: string }> {
   return request('/api/setup/init', {
     method: 'POST',
-    body: JSON.stringify({ username, password, inviteToken, displayName }),
+    body: JSON.stringify({ username, password, turnstileToken, displayName, website: honeypot }),
   });
 }
 

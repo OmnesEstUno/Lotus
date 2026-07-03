@@ -50,6 +50,8 @@ interface PreviewRow {
   row: ParsedCSVRow;
   duplicateStatus: DuplicateStatus;
   duplicateMatch: DuplicateMatch | null;
+  autoSkipped: boolean;         // parser flagged this as filter-skipped (transfer/CC payoff)
+  autoSkipReason: string;       // human-readable label for why it was auto-skipped
 }
 
 export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuccess }: DataEntryProps) {
@@ -233,14 +235,23 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
       // with. Subsequent identical rows in the same batch are also flagged.
       const seenTxn = new Map<string, ParsedCSVRow>();
       const seenIncome = new Map<string, ParsedCSVRow>();
-      const tagged: PreviewRow[] = result.rows.map((row, idx) => {
-        const match = findDuplicateMatch(row, existingDedupLookup, seenTxn, seenIncome);
-        recordRowInBatch(row, seenTxn, seenIncome);
+      const tagged: PreviewRow[] = result.rows.map((parsed, idx) => {
+        const match = parsed.autoSkipped
+          ? null
+          : findDuplicateMatch(parsed.row, existingDedupLookup, seenTxn, seenIncome);
+        if (!parsed.autoSkipped) recordRowInBatch(parsed.row, seenTxn, seenIncome);
         return {
           idx,
-          row,
-          duplicateStatus: match ? 'pending' : 'unique',
+          row: parsed.row,
+          // Auto-skipped rows start out "denied" — the same state used for
+          // duplicates the user has chosen to skip. This lets us reuse
+          // DuplicateStatusCell's approve/deny/revert controls as the
+          // include/exclude toggle: Approve → include on import, Revert →
+          // back to excluded.
+          duplicateStatus: parsed.autoSkipped ? 'denied' : match ? 'pending' : 'unique',
           duplicateMatch: match,
+          autoSkipped: !!parsed.autoSkipped,
+          autoSkipReason: parsed.autoSkipReason ?? '',
         };
       });
       setPreviewRows(tagged);
@@ -289,9 +300,17 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
     );
   }
 
-  const pendingDuplicateCount = previewRows.filter((r) => r.duplicateStatus === 'pending').length;
+  // Auto-skipped rows start life as 'denied' (see handleFile) so they reuse
+  // DuplicateStatusCell's approve/deny/revert controls as their include/
+  // exclude toggle. They're not real duplicates, so they're excluded from
+  // both the "pending review" and "total duplicates" tallies.
+  const pendingDuplicateCount = previewRows.filter(
+    (r) => r.duplicateStatus === 'pending' && !r.autoSkipped,
+  ).length;
   const totalDuplicateCount = previewRows.filter(
-    (r) => r.duplicateStatus === 'pending' || r.duplicateStatus === 'approved' || r.duplicateStatus === 'denied',
+    (r) =>
+      !r.autoSkipped &&
+      (r.duplicateStatus === 'pending' || r.duplicateStatus === 'approved' || r.duplicateStatus === 'denied'),
   ).length;
 
   async function submitUpload() {
@@ -305,8 +324,12 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
     await runMutation({
       onStart: () => { setSubmitting(true); setSubmitError(null); },
       call: async () => {
-        // Denied rows are dropped entirely
-        const toSubmit = previewRows.filter((r) => r.duplicateStatus !== 'denied');
+        // Denied rows are dropped entirely — this also covers auto-skipped
+        // rows (transfers, CC payoffs), which start out 'denied' and are
+        // only included if the user approved them via DuplicateStatusCell.
+        const toSubmit = previewRows.filter(
+          (r) => r.duplicateStatus !== 'denied' && r.duplicateStatus !== 'pending',
+        );
         const expenseRows = toSubmit.filter((r) => r.row.kind === 'expense');
         const incomeRows = toSubmit.filter((r) => r.row.kind === 'income');
 
@@ -657,14 +680,16 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
                 <p style={{ color: 'var(--text-secondary)' }}>
                   <strong style={{ color: 'var(--text-primary)' }}>{previewRows.length}</strong> records found
                   {skippedCount > 0 && (
-                    <span className="text-muted text-xs"> &nbsp;({skippedCount} transfer{skippedCount !== 1 ? 's' : ''}/payment{skippedCount !== 1 ? 's' : ''} skipped)</span>
+                    <span className="text-muted text-xs"> &nbsp;({skippedCount} unparseable row{skippedCount !== 1 ? 's' : ''} dropped)</span>
                   )}
                   . Review and edit before importing.
                 </p>
                 <div className="preview-btn-group">
                   <button className="btn btn-ghost btn-sm" onClick={() => { setPreviewRows([]); setParseErrors([]); setSkippedCount(0); }}>Clear</button>
                   <button className="btn btn-primary btn-sm" onClick={submitUpload} disabled={submitting || pendingDuplicateCount > 0}>
-                    {submitting ? <span className="spinner" /> : `Import ${previewRows.filter((r) => r.duplicateStatus !== 'denied').length} Records`}
+                    {submitting
+                      ? <span className="spinner" />
+                      : `Import ${previewRows.filter((r) => r.duplicateStatus !== 'denied' && r.duplicateStatus !== 'pending').length} Records`}
                   </button>
                 </div>
               </div>
@@ -719,16 +744,18 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map(({ idx, row, duplicateStatus, duplicateMatch }) => {
+                    {previewRows.map(({ idx, row, duplicateStatus, duplicateMatch, autoSkipped, autoSkipReason }) => {
                       const isIncome = row.kind === 'income';
                       const rowStyle: React.CSSProperties =
-                        duplicateStatus === 'pending'
-                          ? { background: 'rgba(251,191,36,0.06)', borderLeft: '3px solid var(--warning)' }
-                          : duplicateStatus === 'approved'
-                            ? { background: 'rgba(74,222,128,0.05)', borderLeft: '3px solid var(--success)' }
-                            : duplicateStatus === 'denied'
-                              ? { opacity: 0.4, textDecoration: 'line-through' }
-                              : {};
+                        autoSkipped && duplicateStatus === 'denied'
+                          ? { opacity: 0.5, background: 'rgba(148,163,184,0.05)', borderLeft: '3px solid var(--text-muted)' }
+                          : duplicateStatus === 'pending'
+                            ? { background: 'rgba(251,191,36,0.06)', borderLeft: '3px solid var(--warning)' }
+                            : duplicateStatus === 'approved'
+                              ? { background: 'rgba(74,222,128,0.05)', borderLeft: '3px solid var(--success)' }
+                              : duplicateStatus === 'denied'
+                                ? { opacity: 0.4, textDecoration: 'line-through' }
+                                : {};
                       return (
                         <tr key={idx} style={rowStyle}>
                           <td className="text-sm font-mono nowrap-cell">{row.date}</td>
@@ -750,7 +777,16 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
                               value={row.description}
                               onChange={(e) => updateRow(idx, (r) => ({ ...r, description: e.target.value } as ParsedCSVRow))}
                             />
-                            {duplicateMatch && duplicateStatus !== 'unique' && (
+                            {autoSkipped && (
+                              <div
+                                className="text-xs text-muted duplicate-match-hint"
+                                title={`Auto-skipped: ${autoSkipReason}`}
+                              >
+                                ↳ Auto-skipped: {autoSkipReason}
+                                {duplicateStatus === 'approved' && ' (overridden — will import)'}
+                              </div>
+                            )}
+                            {!autoSkipped && duplicateMatch && duplicateStatus !== 'unique' && (
                               <div
                                 className="text-xs text-muted duplicate-match-hint"
                                 title={`Matches ${duplicateMatch.source === 'existing' ? 'an existing entry' : 'an earlier row in this file'}: ${duplicateMatch.summary}`}
@@ -779,7 +815,9 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
                               status={duplicateStatus}
                               onApprove={() => setDuplicateStatus(idx, 'approved')}
                               onDeny={() => setDuplicateStatus(idx, 'denied')}
-                              onRevert={() => setDuplicateStatus(idx, 'pending')}
+                              // Auto-skipped rows have no real "pending duplicate"
+                              // state to revert to — undo just re-excludes them.
+                              onRevert={() => setDuplicateStatus(idx, autoSkipped ? 'denied' : 'pending')}
                             />
                           </td>
                           <td>

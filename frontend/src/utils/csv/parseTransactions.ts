@@ -19,6 +19,56 @@ interface RowOutcome {
   row?: ParsedCSVRow;
   error?: ParseError;
   skipped?: boolean;
+  autoSkipped?: boolean;
+  autoSkipReason?: string;
+}
+
+// Classifies the amount/description into a full ParsedCSVRow (expense,
+// refund, or income). Shared by the normal path and the auto-skip paths so
+// that refund detection, income detection, and category resolution stay
+// consistent regardless of whether the row ends up auto-excluded.
+function classifyRow(
+  date: string,
+  description: string,
+  amount: number,
+  signIsExpense: boolean,
+  csvCategory: string,
+  userMappings?: CategoryMapping[],
+): ParsedCSVRow {
+  const resolveCategory = () =>
+    applyUserMappings(description, userMappings) ?? categorize(description, csvCategory);
+
+  if (!signIsExpense) {
+    const isIncome =
+      isIncomeCategory(csvCategory) ||
+      descriptionLooksLikeIncome(description) ||
+      descriptionMentionsExternalTransferService(description);
+    if (isIncome) {
+      return {
+        kind: 'income',
+        date,
+        description,
+        amount: Math.abs(amount),
+      };
+    }
+    return {
+      kind: 'expense',
+      date,
+      description,
+      category: resolveCategory(),
+      amount: Math.abs(amount),
+      type: 'refund',
+    };
+  }
+
+  return {
+    kind: 'expense',
+    date,
+    description,
+    category: resolveCategory(),
+    amount: -Math.abs(amount),
+    type: 'expense',
+  };
 }
 
 function parseRow(
@@ -44,10 +94,6 @@ function parseRow(
   const rawAltDesc = schema.altDescription ? (raw[schema.altDescription] || '').trim() : '';
   const description = rawDesc || rawAltDesc;
   if (!description) return { skipped: true };
-
-  // ─ Type hint (e.g. Chase "Type": Sale / Payment / Return / Adjustment) ─
-  const csvType = schema.type ? (raw[schema.type] || '').trim().toLowerCase() : '';
-  if (csvType === 'payment') return { skipped: true };
 
   // ─ Amount — either single column or debit/credit pair ─
   let amount: number;
@@ -80,6 +126,18 @@ function parseRow(
   // ─ Category hint from CSV (optional) ─
   const csvCategory = schema.category ? (raw[schema.category] || '').trim() : '';
 
+  // ─ Type hint (e.g. Chase "Type": Sale / Payment / Return / Adjustment) ─
+  // Chase "Payment" rows are CC payoffs — preserve them as auto-skipped so
+  // the user can still see and opt into them, rather than dropping silently.
+  const csvType = schema.type ? (raw[schema.type] || '').trim().toLowerCase() : '';
+  if (csvType === 'payment') {
+    return {
+      row: classifyRow(date, description, amount, signIsExpense, csvCategory, userMappings),
+      autoSkipped: true,
+      autoSkipReason: 'Chase payment (CC payoff)',
+    };
+  }
+
   // ─ Skip transfers & CC payoffs (don't count as income OR expense) ─
   // Exception: rows whose description mentions an external P2P or money-
   // transfer service (Venmo, Zelle, Cash App, PayPal, Wise, Xoom, Western
@@ -90,63 +148,15 @@ function parseRow(
     !descriptionMentionsExternalTransferService(description) &&
     (isSkippedCategory(csvCategory) || descriptionLooksLikeTransferOrPayment(description))
   ) {
-    return { skipped: true };
-  }
-
-  // ─ Income detection ─
-  //
-  // A row is income if it has a positive amount (or a "credit") AND either:
-  //   - the CSV category says so (paycheck, income, tax refund, ...), or
-  //   - the description contains an income keyword (payroll, IRS TREAS, ...).
-  //
-  // Category resolution: user mappings win over the built-in merchant rules
-  // so that previously-assigned custom categories auto-apply on re-upload.
-  const resolveCategory = () =>
-    applyUserMappings(description, userMappings) ?? categorize(description, csvCategory);
-
-  // If positive but not clearly income, treat as a refund (store return).
-  // Positive amounts from external P2P / money-transfer services (Venmo,
-  // Zelle, Cash App, PayPal, Wise, Xoom, Western Union, MoneyGram, Remitly)
-  // count as income — the counterparty is external, so the money is a real
-  // receipt, not a refund of a prior expense.
-  if (!signIsExpense) {
-    const isIncome =
-      isIncomeCategory(csvCategory) ||
-      descriptionLooksLikeIncome(description) ||
-      descriptionMentionsExternalTransferService(description);
-    if (isIncome) {
-      return {
-        row: {
-          kind: 'income',
-          date,
-          description,
-          amount: Math.abs(amount),
-        },
-      };
-    }
     return {
-      row: {
-        kind: 'expense',
-        date,
-        description,
-        category: resolveCategory(),
-        amount: Math.abs(amount),
-        type: 'refund',
-      },
+      row: classifyRow(date, description, amount, signIsExpense, csvCategory, userMappings),
+      autoSkipped: true,
+      autoSkipReason: 'Transfer or credit-card payment',
     };
   }
 
-  // ─ Ordinary expense ─
-  return {
-    row: {
-      kind: 'expense',
-      date,
-      description,
-      category: resolveCategory(),
-      amount: -Math.abs(amount),
-      type: 'expense',
-    },
-  };
+  // ─ Ordinary row (expense, refund, or income) ─
+  return { row: classifyRow(date, description, amount, signIsExpense, csvCategory, userMappings) };
 }
 
 // ─── Entrypoint ─────────────────────────────────────────────────────────────
@@ -178,7 +188,7 @@ export async function parseTransactionCSV(
         }
 
         const rawRows = results.data as Record<string, string>[];
-        const parsed: ParsedCSVRow[] = [];
+        const parsed: CSVParseResult['rows'] = [];
         const errors: ParseError[] = [];
         let skipped = 0;
 
@@ -186,7 +196,13 @@ export async function parseTransactionCSV(
           const outcome = parseRow(raw, schema, idx + 2, userMappings);
           if (outcome.error) errors.push(outcome.error);
           else if (outcome.skipped) skipped++;
-          else if (outcome.row) parsed.push(outcome.row);
+          else if (outcome.row) {
+            parsed.push({
+              row: outcome.row,
+              autoSkipped: outcome.autoSkipped,
+              autoSkipReason: outcome.autoSkipReason,
+            });
+          }
         });
 
         resolve({ rows: parsed, errors, skippedCount: skipped });

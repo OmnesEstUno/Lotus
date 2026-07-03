@@ -103,9 +103,9 @@ export interface ParsedIncomeRow {
 export type ParsedCSVRow = ParsedExpenseRow | ParsedIncomeRow;
 
 export interface CSVParseResult {
-  rows: ParsedCSVRow[];
+  rows: { row: ParsedCSVRow; autoSkipped?: boolean; autoSkipReason?: string }[];
   errors: ParseError[];
-  skippedCount?: number; // rows intentionally skipped (transfers, CC payments)
+  skippedCount?: number; // structurally-unparseable rows (empty desc, zero amount, ambiguous debit/credit)
 }
 
 export interface ParseError {

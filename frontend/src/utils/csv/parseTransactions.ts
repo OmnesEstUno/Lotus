@@ -7,6 +7,7 @@ import {
   parseDate,
   parseAmount,
   isSkippedCategory,
+  descriptionMentionsVenmoOrZelle,
   isIncomeCategory,
   descriptionLooksLikeIncome,
   descriptionLooksLikeTransferOrPayment,
@@ -80,7 +81,13 @@ function parseRow(
   const csvCategory = schema.category ? (raw[schema.category] || '').trim() : '';
 
   // ─ Skip transfers & CC payoffs (don't count as income OR expense) ─
-  if (isSkippedCategory(csvCategory) || descriptionLooksLikeTransferOrPayment(description)) {
+  // Exception: rows whose description mentions Venmo or Zelle are always
+  // kept, even if the CSV categorises them as "Transfer" — those are
+  // real payments/receipts between the user and a counterparty.
+  if (
+    !descriptionMentionsVenmoOrZelle(description) &&
+    (isSkippedCategory(csvCategory) || descriptionLooksLikeTransferOrPayment(description))
+  ) {
     return { skipped: true };
   }
 

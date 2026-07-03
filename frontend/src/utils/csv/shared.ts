@@ -199,6 +199,18 @@ export function descriptionLooksLikeIncome(description: string): boolean {
 
 // Returns true if a description matches patterns for transfers / CC payoffs.
 // Used when there is no category column.
+//
+// Venmo and Zelle are intentionally NOT in this list: even though the money
+// flows through those services, the counterparty is usually a real person
+// (paying rent, splitting a bill, sending a gift), so the row is a genuine
+// expense or income — not a between-your-own-accounts transfer.
 export function descriptionLooksLikeTransferOrPayment(description: string): boolean {
-  return /\b(transfer\s+to|transfer\s+from|venmo\s+(payment|cashout)|\bzelle\b|autopay|auto-pmt|online\s+payment|payment\s+thank\s+you|automatic\s+payment|credit\s+card\s+payment|card\s+payment|epay|e-pay|chase\s+credit\s+crd|citi\s+card)\b/i.test(description);
+  return /\b(transfer\s+to|transfer\s+from|autopay|auto-pmt|online\s+payment|payment\s+thank\s+you|automatic\s+payment|credit\s+card\s+payment|card\s+payment|epay|e-pay|chase\s+credit\s+crd|citi\s+card)\b/i.test(description);
+}
+
+// Returns true if the description mentions Venmo or Zelle. Used as an
+// override so a row that would otherwise be filtered out by a bank's
+// "Transfer" category label still makes it through.
+export function descriptionMentionsVenmoOrZelle(description: string): boolean {
+  return /\b(venmo|zelle)\b/i.test(description);
 }

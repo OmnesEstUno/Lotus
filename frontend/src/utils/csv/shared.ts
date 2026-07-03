@@ -200,17 +200,20 @@ export function descriptionLooksLikeIncome(description: string): boolean {
 // Returns true if a description matches patterns for transfers / CC payoffs.
 // Used when there is no category column.
 //
-// Venmo and Zelle are intentionally NOT in this list: even though the money
-// flows through those services, the counterparty is usually a real person
-// (paying rent, splitting a bill, sending a gift), so the row is a genuine
-// expense or income — not a between-your-own-accounts transfer.
+// P2P and money-transfer services (Venmo, Zelle, Cash App, PayPal, Wise,
+// Xoom, Western Union, MoneyGram, Remitly) are intentionally NOT in this
+// list: the counterparty is usually another person or an external service
+// (paying rent, splitting a bill, sending money to family, buying from an
+// online seller) — real expenses or income, not between-your-own-accounts
+// transfers.
 export function descriptionLooksLikeTransferOrPayment(description: string): boolean {
   return /\b(transfer\s+to|transfer\s+from|autopay|auto-pmt|online\s+payment|payment\s+thank\s+you|automatic\s+payment|credit\s+card\s+payment|card\s+payment|epay|e-pay|chase\s+credit\s+crd|citi\s+card)\b/i.test(description);
 }
 
-// Returns true if the description mentions Venmo or Zelle. Used as an
-// override so a row that would otherwise be filtered out by a bank's
-// "Transfer" category label still makes it through.
-export function descriptionMentionsVenmoOrZelle(description: string): boolean {
-  return /\b(venmo|zelle)\b/i.test(description);
+// Returns true if the description mentions an external P2P or money-transfer
+// service. Used as an override so a row that would otherwise be filtered
+// out by a bank's "Transfer" category label still makes it through — the
+// money is moving to a counterparty, not between the user's own accounts.
+export function descriptionMentionsExternalTransferService(description: string): boolean {
+  return /\b(venmo|zelle|cash\s?app|paypal|transferwise|wise\s+(us|payments?|inc)|xoom|western\s+union|moneygram|remitly)\b/i.test(description);
 }

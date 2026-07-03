@@ -1,5 +1,5 @@
 import { IncomeEntry } from '../types';
-import { request, lastKnownVersion, getVersionedList } from './core';
+import { request, lastKnownVersion, getVersionedList, rememberVersion } from './core';
 
 // ─── Income ──────────────────────────────────────────────────────────────────
 
@@ -25,6 +25,40 @@ export async function addIncome(
     method: 'POST',
     body: JSON.stringify({ entry, expectedVersion }),
   });
+}
+
+export interface AddIncomeBatchInput {
+  entries: (Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean })[];
+}
+
+export interface AddIncomeBatchResult {
+  added: number;
+  skipped: number;
+  addedTaxTxns: number;
+}
+
+export async function addIncomeBatch(entries: AddIncomeBatchInput['entries']): Promise<AddIncomeBatchResult> {
+  const expectedIncomeVersion = lastKnownVersion('income');
+  const expectedTxnVersion = lastKnownVersion('transactions');
+  if (expectedIncomeVersion === undefined) {
+    throw new Error('Cannot batch income without first fetching income entries.');
+  }
+  if (expectedTxnVersion === undefined) {
+    throw new Error('Cannot batch income without first fetching transactions (tax auto-creation touches transactions).');
+  }
+  const result = await request<{
+    added: number;
+    skipped: number;
+    addedTaxTxns: number;
+    incomeVersion?: number;
+    transactionsVersion?: number;
+  }>('/api/income/batch', {
+    method: 'POST',
+    body: JSON.stringify({ entries, expectedIncomeVersion, expectedTxnVersion }),
+  });
+  if (typeof result.incomeVersion === 'number') rememberVersion('income', result.incomeVersion);
+  if (typeof result.transactionsVersion === 'number') rememberVersion('transactions', result.transactionsVersion);
+  return { added: result.added, skipped: result.skipped, addedTaxTxns: result.addedTaxTxns };
 }
 
 export type IncomeUpdate = Partial<Pick<IncomeEntry, 'date' | 'description' | 'grossAmount' | 'netAmount'>>;

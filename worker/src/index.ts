@@ -1957,6 +1957,113 @@ export default {
         return respond({ skipped: false, entry }, 200, cors);
       }
 
+      // ── POST income batch ──
+      if (path === '/api/income/batch' && method === 'POST') {
+        const body = await request.json() as {
+          entries?: (Omit<IncomeEntry, 'id'> & { allowDuplicate?: boolean })[];
+          expectedIncomeVersion?: number;
+          expectedTxnVersion?: number;
+        };
+        if (typeof body.expectedIncomeVersion !== 'number') {
+          return respond({ error: 'expectedIncomeVersion required' }, 400, cors);
+        }
+        if (typeof body.expectedTxnVersion !== 'number') {
+          return respond({ error: 'expectedTxnVersion required' }, 400, cors);
+        }
+        if (!Array.isArray(body.entries) || body.entries.length === 0) {
+          return respond({ error: 'No entries provided.' }, 400, cors);
+        }
+        if (body.entries.length > MAX_BATCH_SIZE) {
+          return respond({ error: `Batch exceeds maximum of ${MAX_BATCH_SIZE}.` }, 413, cors);
+        }
+
+        // Read both stores once. Version-check BOTH before doing anything.
+        const { items: existingIncome, version: currentIncomeVersion } = await getIncomeEntriesWithVersion(env.FINANCE_KV, instanceId);
+        const { items: existingTxns, version: currentTxnVersion } = await getTransactionsWithVersion(env.FINANCE_KV, instanceId);
+        if (body.expectedIncomeVersion !== currentIncomeVersion) {
+          return respond({ error: 'conflict', currentIncomeVersion, currentTxnVersion }, 409, cors);
+        }
+        if (body.expectedTxnVersion !== currentTxnVersion) {
+          return respond({ error: 'conflict', currentIncomeVersion, currentTxnVersion }, 409, cors);
+        }
+
+        const seenIncomeKeys = new Set(existingIncome.map(incomeKey));
+        const seenTxnKeys = new Set(existingTxns.map(transactionKey));
+        const addedIncome: IncomeEntry[] = [];
+        const addedTxns: Transaction[] = [];
+        let skippedIncome = 0;
+
+        const taxFields: Array<[keyof TaxBreakdown, string]> = [
+          ['federal', 'Federal Income Tax'],
+          ['state', 'State Income Tax'],
+          ['socialSecurity', 'Social Security Tax'],
+          ['medicare', 'Medicare Tax'],
+          ['other', 'Other Tax Deductions'],
+        ];
+
+        for (const raw of body.entries) {
+          const { allowDuplicate, ...rawEntry } = raw;
+          if (!allowDuplicate) {
+            const k = incomeKey(rawEntry);
+            if (seenIncomeKeys.has(k)) {
+              skippedIncome++;
+              continue;
+            }
+            seenIncomeKeys.add(k);
+          }
+          const entry: IncomeEntry = { ...rawEntry, id: generateId() };
+          addedIncome.push(entry);
+
+          // Generate tax transactions for this entry, dedup against existing +
+          // any tax txns already accumulated in this batch.
+          const taxes = entry.taxes;
+          const totalTax = (taxes.federal ?? 0) + (taxes.state ?? 0) + (taxes.socialSecurity ?? 0) + (taxes.medicare ?? 0) + (taxes.other ?? 0);
+          if (totalTax > 0) {
+            for (const [field, label] of taxFields) {
+              const amt = taxes[field] ?? 0;
+              if (amt > 0) {
+                const candidate: Transaction = {
+                  id: generateId(),
+                  date: entry.date,
+                  description: `${label} — ${entry.description}`,
+                  notes: '',
+                  category: 'Taxes',
+                  amount: -amt,
+                  type: 'expense' as const,
+                  source: 'manual' as const,
+                };
+                const k = transactionKey(candidate);
+                if (!seenTxnKeys.has(k)) {
+                  seenTxnKeys.add(k);
+                  addedTxns.push(candidate);
+                }
+              }
+            }
+          }
+        }
+
+        // Single write per storage. Only touch a store if it actually changed —
+        // otherwise its version stays where it is.
+        let newIncomeVersion = currentIncomeVersion;
+        let newTxnVersion = currentTxnVersion;
+        if (addedIncome.length > 0) {
+          await saveIncomeEntries(env.FINANCE_KV, instanceId, [...existingIncome, ...addedIncome]);
+          newIncomeVersion = currentIncomeVersion + 1;
+        }
+        if (addedTxns.length > 0) {
+          await saveTransactions(env.FINANCE_KV, instanceId, [...existingTxns, ...addedTxns]);
+          newTxnVersion = currentTxnVersion + 1;
+        }
+
+        return respond({
+          added: addedIncome.length,
+          skipped: skippedIncome,
+          addedTaxTxns: addedTxns.length,
+          incomeVersion: newIncomeVersion,
+          transactionsVersion: newTxnVersion,
+        }, 200, cors);
+      }
+
       // ── DELETE income ──
       const incDeleteMatch = path.match(/^\/api\/income\/([^/]+)$/);
       if (incDeleteMatch && method === 'DELETE') {

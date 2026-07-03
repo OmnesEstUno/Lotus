@@ -9,7 +9,7 @@ import {
   getTransactions,
 } from '../api/transactions';
 import type { AddTransactionInput } from '../api/transactions';
-import { addIncome, getIncome } from '../api/income';
+import { addIncome, addIncomeBatch, getIncome } from '../api/income';
 import { runMutation } from '../utils/mutation';
 import { formatCurrency } from '../utils/dataProcessing/shared';
 import {
@@ -337,20 +337,23 @@ export default function DataEntry({ onRequestClose, onPendingChange, onSubmitSuc
 
         let addedIncome = 0;
         let skippedIncome = 0;
-        for (const r of incomeRows) {
-          const row = r.row as Extract<ParsedCSVRow, { kind: 'income' }>;
-          const result = await addIncome({
-            date: row.date,
-            description: row.description,
-            grossAmount: row.amount,
-            netAmount: row.amount,
-            taxes: { federal: 0, state: 0, socialSecurity: 0, medicare: 0, other: 0 },
-            source: 'manual',
-            // Approved duplicates bypass the server's dedup check
-            allowDuplicate: r.duplicateStatus === 'approved',
+        if (incomeRows.length > 0) {
+          const batch = incomeRows.map((r) => {
+            const row = r.row as Extract<ParsedCSVRow, { kind: 'income' }>;
+            return {
+              date: row.date,
+              description: row.description,
+              grossAmount: row.amount,
+              netAmount: row.amount,
+              taxes: { federal: 0, state: 0, socialSecurity: 0, medicare: 0, other: 0 },
+              source: 'manual' as const,
+              // Approved duplicates bypass the server's dedup check
+              allowDuplicate: r.duplicateStatus === 'approved',
+            };
           });
-          if (result.skipped) skippedIncome++;
-          else addedIncome++;
+          const result = await addIncomeBatch(batch);
+          addedIncome = result.added;
+          skippedIncome = result.skipped;
         }
 
         return { addedTxns, skippedTxns, addedIncome, skippedIncome };

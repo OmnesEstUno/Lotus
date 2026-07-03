@@ -105,8 +105,15 @@ function parseRow(
     applyUserMappings(description, userMappings) ?? categorize(description, csvCategory);
 
   // If positive but not clearly income, treat as a refund (store return).
+  // Positive amounts from external P2P / money-transfer services (Venmo,
+  // Zelle, Cash App, PayPal, Wise, Xoom, Western Union, MoneyGram, Remitly)
+  // count as income — the counterparty is external, so the money is a real
+  // receipt, not a refund of a prior expense.
   if (!signIsExpense) {
-    const isIncome = isIncomeCategory(csvCategory) || descriptionLooksLikeIncome(description);
+    const isIncome =
+      isIncomeCategory(csvCategory) ||
+      descriptionLooksLikeIncome(description) ||
+      descriptionMentionsExternalTransferService(description);
     if (isIncome) {
       return {
         row: {

@@ -296,9 +296,13 @@ export default function Login() {
       setUsername(trimmedUsername);
       // First-login biometric onboarding (modal also surfaces optional TOTP).
       storage.set(STORAGE_KEYS.BIOMETRIC_PROMPT_PENDING, '1');
-      setStep('login-password');
       setPassword('');
       setConfirmPassword('');
+      // Route to /login so the URL matches the step we're about to show
+      // (the route-aware effect would otherwise flip us straight back to
+      // the signup form as long as we stayed on /signup).
+      navigate('/login');
+      setStep('login-password');
     } catch (err) {
       setError((err as Error).message);
     } finally {

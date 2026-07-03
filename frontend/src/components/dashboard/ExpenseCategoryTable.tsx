@@ -69,7 +69,7 @@ export default function ExpenseCategoryTable({
     ? transactions
         .filter((t) => {
           if (t.archived) return false;
-          if (t.type !== 'expense') return false;
+          if (t.type !== 'expense' && t.type !== 'refund') return false;
           if (t.category !== expandedCategory) return false;
           const d = parseISO(t.date);
           return d >= rangeStart && d <= rangeEnd;
@@ -91,7 +91,7 @@ export default function ExpenseCategoryTable({
     date: t.date,
     description: t.description,
     category: t.category,
-    amount: Math.abs(t.amount),
+    amount: -t.amount,
     notes: t.notes,
   }));
 

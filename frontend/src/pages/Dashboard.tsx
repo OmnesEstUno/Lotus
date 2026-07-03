@@ -304,8 +304,8 @@ export default function Dashboard() {
     );
   }
 
-  const expenses = transactions.filter((t) => t.type === 'expense');
-  const totalExpenses = expenses.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const expenseAndRefundRows = transactions.filter((t) => t.type === 'expense' || t.type === 'refund');
+  const totalExpenses = expenseAndRefundRows.reduce((s, t) => s + (-t.amount), 0);
   const totalIncome = income.reduce((s, e) => s + e.netAmount, 0);
   const surplus = totalIncome - totalExpenses;
 

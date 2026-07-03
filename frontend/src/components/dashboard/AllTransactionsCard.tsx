@@ -37,7 +37,7 @@ export default function AllTransactionsCard({
   const events: DrillDownEvent[] = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return transactions
-      .filter((t) => !t.archived && t.type === 'expense')
+      .filter((t) => !t.archived && (t.type === 'expense' || t.type === 'refund'))
       .filter((t) => {
         if (range) return t.date >= range.start && t.date <= range.end;
         if (year === ALL_YEARS) return true;
@@ -51,7 +51,7 @@ export default function AllTransactionsCard({
         date: t.date,
         description: t.description,
         category: t.category,
-        amount: Math.abs(t.amount),
+        amount: -t.amount,
         notes: t.notes,
       }));
   }, [transactions, year, range, searchQuery]);

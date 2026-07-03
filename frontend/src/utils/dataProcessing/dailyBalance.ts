@@ -24,10 +24,10 @@ export function buildDailyBalance(
 
   transactions.forEach((t) => {
     if (t.archived) return;
-    if (t.type !== 'expense') return;
+    if (t.type !== 'expense' && t.type !== 'refund') return;
     const d = parseISO(t.date);
     if (d.getFullYear() !== year || d.getMonth() !== month) return;
-    result[d.getDate() - 1].expenses += Math.abs(t.amount);
+    result[d.getDate() - 1].expenses += -t.amount;
   });
 
   incomeEntries.forEach((entry) => {

@@ -23,7 +23,7 @@ export function buildMonthEvents(
 
   transactions.forEach((t) => {
     if (t.archived) return;
-    if (t.type !== 'expense') return;
+    if (t.type !== 'expense' && t.type !== 'refund') return;
     const d = parseISO(t.date);
     if (d.getFullYear() !== year || d.getMonth() !== month) return;
     events.push({
@@ -33,7 +33,7 @@ export function buildMonthEvents(
       kind: 'expense',
       category: t.category,
       description: t.description,
-      amount: Math.abs(t.amount),
+      amount: -t.amount,
     });
   });
 

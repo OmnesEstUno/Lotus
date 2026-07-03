@@ -13,7 +13,7 @@ export interface CategoryAverage {
 export function buildCategoryAverages(transactions: Transaction[]): CategoryAverage[] {
   if (transactions.length === 0) return [];
 
-  const expenses = transactions.filter((t) => !t.archived && t.type === 'expense');
+  const expenses = transactions.filter((t) => !t.archived && (t.type === 'expense' || t.type === 'refund'));
   if (expenses.length === 0) return [];
 
   // Find overall date range
@@ -30,7 +30,7 @@ export function buildCategoryAverages(transactions: Transaction[]): CategoryAver
   const totals = new Map<Category, number>();
 
   expenses.forEach((t) => {
-    totals.set(t.category, (totals.get(t.category) ?? 0) + Math.abs(t.amount));
+    totals.set(t.category, (totals.get(t.category) ?? 0) + (-t.amount));
   });
 
   return [...totals.entries()]

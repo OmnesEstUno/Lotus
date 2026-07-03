@@ -66,7 +66,7 @@ export function buildLineChartData(
   // Filter only expenses in the date range (exclude Taxes from trending, exclude archived)
   const filtered = transactions.filter((t) => {
     if (t.archived) return false;
-    if (t.type !== 'expense') return false;
+    if (t.type !== 'expense' && t.type !== 'refund') return false;
     if (t.category === 'Taxes') return false;
     const d = parseISO(t.date);
     return isWithinInterval(d, { start, end });
@@ -91,7 +91,7 @@ export function buildLineChartData(
     const d = parseISO(t.date);
     const key = getKey(d);
     const entry = data.get(key)!;
-    const val = Math.abs(t.amount);
+    const val = -t.amount;
     entry[t.category] = (entry[t.category] ?? 0) + val;
   });
 

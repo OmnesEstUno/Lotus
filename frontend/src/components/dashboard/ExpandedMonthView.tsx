@@ -75,10 +75,11 @@ function ExpandedMonthView({
   const monthLabel = `${MONTH_NAMES_SHORT[month]} ${year}`;
 
   // Daily chart must react to chip selection: filter transactions by active
-  // categories before handing them to buildDailyBalance. Non-expenses pass
-  // through (buildDailyBalance already handles them appropriately).
+  // categories before handing them to buildDailyBalance. Non-expense,
+  // non-refund rows pass through (buildDailyBalance already handles them
+  // appropriately).
   const expenseCategoryAllowed = (t: Transaction) => {
-    if (t.type !== 'expense') return true; // non-expenses pass (and buildDailyBalance ignores them anyway)
+    if (t.type !== 'expense' && t.type !== 'refund') return true; // other rows pass (and buildDailyBalance ignores them anyway)
     if (selectedCategories === null) return true;
     if (!t.category) return false;
     return selectedCategories.has(t.category);

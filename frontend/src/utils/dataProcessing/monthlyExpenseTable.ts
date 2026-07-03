@@ -33,7 +33,7 @@ export function buildMonthlyExpenseTable(
     columns = [];
     for (let m = 0; m <= lastMonth; m++) columns.push({ year, month: m });
     filtered = transactions.filter((t) => {
-      if (t.archived || t.type !== 'expense') return false;
+      if (t.archived || (t.type !== 'expense' && t.type !== 'refund')) return false;
       return parseISO(t.date).getFullYear() === year;
     });
   } else {
@@ -48,7 +48,7 @@ export function buildMonthlyExpenseTable(
       cur.setMonth(cur.getMonth() + 1);
     }
     filtered = transactions.filter((t) => {
-      if (t.archived || t.type !== 'expense') return false;
+      if (t.archived || (t.type !== 'expense' && t.type !== 'refund')) return false;
       return t.date >= start && t.date <= end;
     });
   }
@@ -61,7 +61,7 @@ export function buildMonthlyExpenseTable(
     const idx = colIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
     if (idx === undefined) continue;
     const bucket = byCategory.get(t.category) ?? new Array(columns.length).fill(0);
-    bucket[idx] += Math.abs(t.amount);
+    bucket[idx] += -t.amount;
     byCategory.set(t.category, bucket);
   }
 

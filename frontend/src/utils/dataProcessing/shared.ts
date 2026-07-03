@@ -19,7 +19,7 @@ export function getTrendingCategories(transactions: Transaction[]): Category[] {
   const set = new Set<Category>();
   for (const t of transactions) {
     if (t.archived) continue;
-    if (t.type !== 'expense') continue;
+    if (t.type !== 'expense' && t.type !== 'refund') continue;
     if (t.category === 'Taxes') continue;
     set.add(t.category);
   }

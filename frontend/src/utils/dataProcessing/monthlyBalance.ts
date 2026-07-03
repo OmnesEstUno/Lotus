@@ -25,7 +25,7 @@ function accumulateByPeriod(
     if (!filterTx(t, d)) continue;
     const key = periodKey(d);
     const bucket = out.get(key) ?? { income: 0, expenses: 0 };
-    bucket.expenses += Math.abs(t.amount);
+    bucket.expenses += -t.amount;
     out.set(key, bucket);
   }
 
@@ -66,7 +66,7 @@ export function buildMonthlyBalance(
       transactions,
       incomeEntries,
       keyOf,
-      (t, _d) => !t.archived && t.type === 'expense',
+      (t, _d) => !t.archived && (t.type === 'expense' || t.type === 'refund'),
       // Taxes are already tracked as separate transactions; income added wholesale here.
       (_e, _d) => true,
     );
@@ -91,7 +91,7 @@ export function buildMonthlyBalance(
     transactions,
     incomeEntries,
     (d) => String(d.getMonth()),
-    (t, d) => !t.archived && t.type === 'expense' && d.getFullYear() === year,
+    (t, d) => !t.archived && (t.type === 'expense' || t.type === 'refund') && d.getFullYear() === year,
     // Taxes are already tracked as separate transactions; income added wholesale here.
     (_e, d) => d.getFullYear() === year,
   );

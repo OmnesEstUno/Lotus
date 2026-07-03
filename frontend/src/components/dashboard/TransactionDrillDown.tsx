@@ -452,8 +452,8 @@ export default function TransactionDrillDown({
                       </span>
                     )}
                   </td>
-                  <td className={`num ${e.kind === 'income' ? 'text-success' : 'text-danger'}`}>
-                    {e.kind === 'income' ? '+' : ''}{formatCurrency(e.amount)}
+                  <td className={`num ${e.kind === 'income' || e.amount < 0 ? 'text-success' : 'text-danger'}`}>
+                    {e.kind === 'income' || e.amount < 0 ? '+' : ''}{formatCurrency(Math.abs(e.amount))}
                   </td>
                   <td onClick={(ev) => ev.stopPropagation()}>
                     <RowActionsMenu
